@@ -376,7 +376,6 @@ static int macsmc_gpio_probe(struct platform_device *pdev)
 static struct platform_driver macsmc_gpio_driver = {
 	.driver = {
 		.name = "macsmc-gpio",
-		.owner = THIS_MODULE,
 	},
 	.probe = macsmc_gpio_probe,
 };
