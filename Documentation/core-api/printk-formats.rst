@@ -657,6 +657,16 @@ Examples for a big-endian machine, given &(u32)0x67503030::
 	%p4cb	gP00 (0x67503030)
 	%p4cr	00Pg (0x30305067)
 
+Rust
+----
+
+::
+
+	%pA
+
+Only intended to be used from Rust code to format ``core::fmt::Arguments``.
+Do *not* use it from C.
+
 Thanks
 ======
 
