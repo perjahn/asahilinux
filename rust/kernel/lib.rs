@@ -64,6 +64,7 @@ pub mod pages;
 pub mod power;
 pub mod revocable;
 pub mod security;
+pub mod soc;
 pub mod str;
 pub mod task;
 pub mod time;
