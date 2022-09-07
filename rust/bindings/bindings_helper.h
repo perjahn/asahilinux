@@ -7,6 +7,7 @@
  */
 
 #include <kunit/test.h>
+#include <drm/drm_device.h>
 #include <linux/amba/bus.h>
 #include <linux/device.h>
 #include <linux/cdev.h>
