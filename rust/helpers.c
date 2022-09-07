@@ -18,6 +18,7 @@
  * accidentally exposed.
  */
 
+#include <drm/drm_gem.h>
 #include <linux/amba/bus.h>
 #include <linux/bug.h>
 #include <linux/build_bug.h>
@@ -731,6 +732,22 @@ int rust_helper_xa_err(void *entry)
 	return xa_err(entry);
 }
 EXPORT_SYMBOL_GPL(rust_helper_xa_err);
+
+#ifdef CONFIG_DRM
+
+void rust_helper_drm_gem_object_get(struct drm_gem_object *obj)
+{
+	drm_gem_object_get(obj);
+}
+EXPORT_SYMBOL_GPL(rust_helper_drm_gem_object_get);
+
+void rust_helper_drm_gem_object_put(struct drm_gem_object *obj)
+{
+	drm_gem_object_put(obj);
+}
+EXPORT_SYMBOL_GPL(rust_helper_drm_gem_object_put);
+
+#endif
 
 /*
  * We use `bindgen`'s `--size_t-is-usize` option to bind the C `size_t` type
