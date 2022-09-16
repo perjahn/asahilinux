@@ -86,7 +86,7 @@ impl platform::Driver for AsahiDevice {
         AsahiDevice::start_cpu(&mut res)?;
 
         let reg = drm::drv::Registration::<AsahiDevice>::new(&dev)?;
-        let gpu = gpu::GpuManagerG13GV13_0b4::new(&reg.device(), &hw::t8103::HWCONFIG)?;
+        let gpu = gpu::GpuManagerG13GV13_0B4::new(&reg.device(), &hw::t8103::HWCONFIG)?;
 
         let data =
             kernel::new_device_data!(reg, res, AsahiData { dev, gpu }, "Asahi::Registrations")?;
