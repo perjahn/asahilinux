@@ -328,7 +328,7 @@
 			reg = <0x9 0xfff78000 0 0x40000>;
 		};
 
-		uat_contexts: uat-contexts {
+		uat_ttbs: uat-ttbs {
 			reg = <0x9 0xfffb8000 0 0x4000>;
 		};
 	};
@@ -354,8 +354,8 @@
 				<AIC_IRQ 579 IRQ_TYPE_LEVEL_HIGH>;
 			mboxes = <&agx_mbox>;
 			power-domains = <&ps_gfx>;
-			memory-region = <&uat_contexts>, <&uat_pagetables>, <&uat_handoff>;
-			memory-region-names = "contexts", "pagetables", "handoff";
+			memory-region = <&uat_ttbs>, <&uat_pagetables>, <&uat_handoff>;
+			memory-region-names = "ttbs", "pagetables", "handoff";
 		};
 
 		agx_mbox: mbox@206408000 {
