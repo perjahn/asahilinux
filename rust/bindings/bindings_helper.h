@@ -54,6 +54,7 @@
 #include <linux/xarray.h>
 #include <uapi/asm-generic/ioctl.h>
 #include <uapi/linux/android/binder.h>
+#include <uapi/drm/asahi_drm.h>
 
 /* `bindgen` gets confused at certain things. */
 const gfp_t BINDINGS_GFP_KERNEL = GFP_KERNEL;
