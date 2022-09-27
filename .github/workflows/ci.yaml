@@ -12,7 +12,7 @@ jobs:
 
     strategy:
       matrix:
-        arch: [arm, arm64, ppc64le, riscv64, x86_64]
+        arch: [arm64, ppc64le, riscv64, x86_64]
         toolchain: [gcc, clang, llvm]
         config: [debug, release]
         output: [src] # [src, build]
