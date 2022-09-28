@@ -43,7 +43,36 @@ jobs:
         #   - The other option for `output`.
         #   - Whether to use a custom sysroot.
         #   - Explicitly enabling `lto` on platforms which support LTO.
+        #   - Asahi Linux configs (arm64 only)
         include:
+          - arch: arm64
+            toolchain: gcc
+            config: asahidev
+            output: src
+            sysroot: common
+            lto: none
+
+          - arch: arm64
+            toolchain: clang
+            config: asahidev
+            output: src
+            sysroot: common
+            lto: none
+
+          - arch: arm64
+            toolchain: llvm
+            config: asahidev
+            output: src
+            sysroot: common
+            lto: none
+
+          - arch: arm64
+            toolchain: llvm
+            config: asahidev
+            output: src
+            sysroot: common
+            lto: thin
+
           - arch: arm64
             toolchain: gcc
             config: debug
