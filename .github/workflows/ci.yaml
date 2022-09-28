@@ -267,9 +267,6 @@ jobs:
       # Print the final config used
       - run: cat ${{ env.BUILD_DIR }}.config
 
-      # Make sure `CONFIG_WERROR` was enabled
-      - run: grep -F 'CONFIG_WERROR=y' ${{ env.BUILD_DIR }}.config
-
       # Prepare image
       - run: |
           mv $HOME/busybox-${{ matrix.arch }} busybox
