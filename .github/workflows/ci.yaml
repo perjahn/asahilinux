@@ -75,6 +75,13 @@ jobs:
 
           - arch: arm64
             toolchain: gcc
+            config: asahiarch
+            output: src
+            sysroot: common
+            lto: none
+
+          - arch: arm64
+            toolchain: gcc
             config: debug
             output: build
             sysroot: custom
