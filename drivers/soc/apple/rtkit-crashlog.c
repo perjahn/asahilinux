@@ -122,7 +122,7 @@ static void apple_rtkit_crashlog_dump_regs(struct apple_rtkit *rtk, u8 *bfr,
 	int i;
 
 	if (size < sizeof(regs)) {
-		dev_warn(rtk->dev, "RTKit: Regs section too small: 0x%llx", size);
+		dev_warn(rtk->dev, "RTKit: Regs section too small: 0x%lx", size);
 		return;
 	}
 
