@@ -1391,7 +1391,7 @@ void dcp_flush(struct drm_crtc *crtc, struct drm_atomic_state *state)
 	struct drm_plane_state *new_state, *old_state;
 	struct drm_crtc_state *crtc_state;
 	struct dcp_swap_submit_req *req = &dcp->swap;
-	int l;
+	int plane_idx, l;
 	int has_surface = 0;
 	bool modeset;
 	dev_dbg(dcp->dev, "%s", __func__);
@@ -1415,9 +1415,14 @@ void dcp_flush(struct drm_crtc *crtc, struct drm_atomic_state *state)
 	for (l = 0; l < SWAP_SURFACES; l++)
 		req->surf_null[l] = true;
 
-	for_each_oldnew_plane_in_state(state, plane, old_state, new_state, l) {
+	l = 0;
+	for_each_oldnew_plane_in_state(state, plane, old_state, new_state, plane_idx) {
 		struct drm_framebuffer *fb = new_state->fb;
 		struct drm_rect src_rect;
+
+		/* skip planes not for this crtc */
+		if (old_state->crtc != crtc && new_state->crtc != crtc)
+			continue;
 
 		WARN_ON(l >= SWAP_SURFACES);
 
@@ -1447,6 +1452,7 @@ void dcp_flush(struct drm_crtc *crtc, struct drm_atomic_state *state)
 			if (old_state->fb)
 				req->swap.swap_enabled |= DCP_REMOVE_LAYERS;
 
+			l += 1;
 			continue;
 		}
 		req->surf_null[l] = false;
@@ -1476,6 +1482,8 @@ void dcp_flush(struct drm_crtc *crtc, struct drm_atomic_state *state)
 			.has_comp = 1,
 			.has_planes = 1,
 		};
+
+		l += 1;
 	}
 
 	/* These fields should be set together */
