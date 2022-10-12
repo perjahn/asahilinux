@@ -879,6 +879,10 @@ impl Renderer for Renderer::ver {
         batch_frag.wait();
         dev_info!(self.dev, "[Submission {}] Fragment batch completed!\n", id);
 
+        dev_info!(self.dev, "[Submission {}] Wait for GPU poweroff...\n", id);
+        gpu.wait_for_poweroff(1000)?;
+        dev_info!(self.dev, "[Submission {}] GPU powered down!\n", id);
+
         Ok(())
     }
 }
