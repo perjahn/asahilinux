@@ -286,7 +286,7 @@ impl StatsChannel::ver {
             match tag {
                 0..=STATS_MAX::ver => {
                     let msg = unsafe { msg.msg };
-                    pr_info!("Stats: {:?}", msg);
+                    //pr_info!("Stats: {:?}", msg);
                 }
                 _ => {
                     pr_warn!("Unknown stats message: {:?}", unsafe { msg.raw });
