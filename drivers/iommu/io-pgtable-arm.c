@@ -492,7 +492,7 @@ static arm_lpae_iopte arm_lpae_prot_to_pte(struct arm_lpae_io_pgtable *data,
 	 * terms, depending on coherency).
 	 */
 	if (data->iop.fmt == APPLE_UAT)
-		pte |= ARM_LPAE_PTE_SH_NS;
+		pte |= ARM_LPAE_PTE_SH_OS;
 	else if (prot & IOMMU_CACHE && data->iop.fmt != ARM_MALI_LPAE)
 		pte |= ARM_LPAE_PTE_SH_IS;
 	else
