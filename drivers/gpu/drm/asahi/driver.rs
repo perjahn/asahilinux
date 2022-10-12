@@ -14,6 +14,7 @@ use kernel::macros::vtable;
 
 const ASC_CTL_SIZE: usize = 0x4000;
 const SGX_SIZE: usize = 0x1000000;
+const AXI2AF_SIZE: usize = 0x10000;
 const CPU_CONTROL: usize = 0x44;
 const CPU_RUN: u32 = 0x1 << 4; // BIT(4)
 
@@ -33,7 +34,8 @@ pub(crate) struct AsahiData {
 
 pub(crate) struct AsahiResources {
     asc: IoMem<ASC_CTL_SIZE>,
-    sgx: IoMem<SGX_SIZE>,
+    pub(crate) sgx: IoMem<SGX_SIZE>,
+    axi2af: IoMem<AXI2AF_SIZE>,
 }
 
 type DeviceData = device::Data<drv::Registration<AsahiDriver>, AsahiResources, AsahiData>;
@@ -48,6 +50,62 @@ impl AsahiDriver {
     }
 
     fn init_mmio(res: &mut AsahiResources) -> Result {
+        // Read: 0x100
+        Self::write32(&mut res.axi2af, 0x410, 0x1100);
+        // Read: 0x100
+        Self::write32(&mut res.axi2af, 0x420, 0x1100);
+        // Read: 0x100
+        Self::write32(&mut res.axi2af, 0x430, 0x1100);
+        // Read: 0x0
+        Self::write32(&mut res.axi2af, 0x8000, 0x9);
+        // Read: 0x0
+        Self::write32(&mut res.axi2af, 0x820, 0x80);
+        Self::write32(&mut res.axi2af, 0x8008, 0x7);
+        Self::write32(&mut res.axi2af, 0x8014, 0x1);
+        // Read: 0x0
+        Self::write32(&mut res.axi2af, 0x8018, 0x1);
+        // Read: 0x0
+        Self::write32(&mut res.axi2af, 0x748, 0x1);
+        Self::write32(&mut res.axi2af, 0x8208, 0x2);
+        Self::write32(&mut res.axi2af, 0x8280, 0x20);
+        Self::write32(&mut res.axi2af, 0x8288, 0x3);
+        Self::write32(&mut res.axi2af, 0x828c, 0xc);
+        Self::write32(&mut res.axi2af, 0x8290, 0x18);
+        Self::write32(&mut res.axi2af, 0x8294, 0x30);
+        Self::write32(&mut res.axi2af, 0x8298, 0x78);
+        Self::write32(&mut res.axi2af, 0x829c, 0xff);
+        // Read: 0x0
+        Self::write32(&mut res.axi2af, 0x82b8, 0x1);
+        Self::write32(&mut res.axi2af, 0x82bc, 0x1);
+        // Read: 0x0
+        Self::write32(&mut res.axi2af, 0x82c0, 0x1);
+        // Read: 0x0
+        Self::write32(&mut res.axi2af, 0x7a8, 0x1);
+        Self::write32(&mut res.axi2af, 0x820c, 0x5);
+        Self::write32(&mut res.axi2af, 0x8284, 0x20);
+        Self::write32(&mut res.axi2af, 0x82a0, 0x3);
+        Self::write32(&mut res.axi2af, 0x82a4, 0xc);
+        Self::write32(&mut res.axi2af, 0x82a8, 0x18);
+        Self::write32(&mut res.axi2af, 0x82ac, 0x30);
+        Self::write32(&mut res.axi2af, 0x82b0, 0x78);
+        Self::write32(&mut res.axi2af, 0x82b4, 0xff);
+        // Read: 0x1
+        Self::write32(&mut res.axi2af, 0x82b8, 0x3);
+        // Read: 0x1
+        Self::write32(&mut res.axi2af, 0x82c0, 0x3);
+        Self::write32(&mut res.axi2af, 0x8210, 0x0);
+        Self::write32(&mut res.axi2af, 0x8408, 0xd);
+        Self::write32(&mut res.axi2af, 0x8418, 0x3);
+        Self::write32(&mut res.axi2af, 0x841c, 0x0);
+        Self::write32(&mut res.axi2af, 0x8420, 0xffffffff);
+        Self::write32(&mut res.axi2af, 0x8424, 0x0);
+        Self::write32(&mut res.axi2af, 0x8428, 0xfff);
+        // Read: 0x3
+        Self::write32(&mut res.axi2af, 0x82b8, 0x7);
+        Self::write32(&mut res.axi2af, 0x82bc, 0x4);
+        // Read: 0x3
+        Self::write32(&mut res.axi2af, 0x82c0, 0x7);
+
         // Read: 0x0
         Self::write32(&mut res.sgx, 0xd14000, 0x70001);
         Ok(())
@@ -108,11 +166,13 @@ impl platform::Driver for AsahiDriver {
         // SAFETY: AGX does DMA via the UAT IOMMU (mostly)
         let asc_res = unsafe { pdev.ioremap_resource(0)? };
         let sgx_res = unsafe { pdev.ioremap_resource(1)? };
+        let axi2af_res = unsafe { pdev.ioremap_resource(2)? };
 
         let mut res = AsahiResources {
             // SAFETY: This device does DMA via the UAT IOMMU.
             asc: asc_res,
             sgx: sgx_res,
+            axi2af: axi2af_res,
         };
 
         // Initialize misc MMIO

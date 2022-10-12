@@ -124,6 +124,7 @@ pub(crate) trait GpuManager: Send + Sync {
         &self,
         context: &fw::types::GpuObject<fw::workqueue::GpuContextData>,
     ) -> Result;
+    fn magic_poke(&self) -> Result;
     fn wait_for_poweroff(&self, timeout: usize) -> Result;
 }
 
@@ -395,6 +396,7 @@ impl GpuManager for GpuManager::ver {
         let index: usize = 0;
         let mut pipe = pipes[index].lock();
 
+        self.magic_poke()?;
         batch.submit(&mut pipe)?;
 
         let mut guard = self.rtkit.lock();
@@ -462,6 +464,14 @@ impl GpuManager for GpuManager::ver {
 
     fn ids(&self) -> &SequenceIDs {
         &self.ids
+    }
+
+    fn magic_poke(&self) -> Result {
+        let dev = self.dev.data();
+        let res = dev.resources().ok_or(EIO)?;
+        let val = res.sgx.readl_relaxed(0xd14000);
+        res.sgx.writel_relaxed(0x70001 | val, 0xd14000);
+        Ok(())
     }
 
     fn wait_for_poweroff(&self, timeout: usize) -> Result {
