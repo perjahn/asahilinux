@@ -19,7 +19,6 @@
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
-#include <linux/platform_device.h>
 #include <linux/pm_opp.h>
 #include <linux/slab.h>
 
@@ -70,6 +69,39 @@ struct apple_cpu_priv {
 #define APPLE_DVFS_TRANSITION_TIMEOUT 100
 
 static struct cpufreq_driver apple_soc_cpufreq_driver;
+
+const struct apple_soc_cpufreq_info soc_t8103_info = {
+	.max_pstate = 15,
+	.cur_pstate_mask = APPLE_DVFS_STATUS_CUR_PS_T8103,
+	.cur_pstate_shift = APPLE_DVFS_STATUS_CUR_PS_SHIFT_T8103,
+};
+
+const struct apple_soc_cpufreq_info soc_t8112_info = {
+	.max_pstate = 31,
+	.cur_pstate_mask = APPLE_DVFS_STATUS_CUR_PS_T8112,
+	.cur_pstate_shift = APPLE_DVFS_STATUS_CUR_PS_SHIFT_T8112,
+};
+
+const struct apple_soc_cpufreq_info soc_default_info = {
+	.max_pstate = 15,
+	.cur_pstate_mask = 0, /* fallback */
+};
+
+static const struct of_device_id apple_soc_cpufreq_of_match[] = {
+	{
+		.compatible = "apple,t8103-cluster-cpufreq",
+		.data = &soc_t8103_info,
+	},
+	{
+		.compatible = "apple,t8112-cluster-cpufreq",
+		.data = &soc_t8112_info,
+	},
+	{
+		.compatible = "apple,cluster-cpufreq",
+		.data = &soc_default_info,
+	},
+	{}
+};
 
 static unsigned int apple_soc_cpufreq_get_rate(unsigned int cpu)
 {
@@ -136,49 +168,29 @@ static unsigned int apple_soc_cpufreq_fast_switch(struct cpufreq_policy *policy,
 }
 
 static int apple_soc_cpufreq_find_cluster(struct cpufreq_policy *policy,
-					  void __iomem **reg_base)
+					  void __iomem **reg_base,
+					  const struct apple_soc_cpufreq_info **info)
 {
 	struct of_phandle_args args;
-	struct device_node *cpu_np;
-	char name[32];
-	int cpu, ret;
-	int index;
+	const struct of_device_id *match;
+	int ret = 0;
 
-	cpu_np = of_cpu_device_node_get(policy->cpu);
-	if (!cpu_np)
-		return -EINVAL;
-
-	ret = of_parse_phandle_with_args(cpu_np, "apple,freq-domain",
-					 "#freq-domain-cells", 0, &args);
-	of_node_put(cpu_np);
-	if (ret)
-		return ret;
-
-	index = args.args[0];
-
-	snprintf(name, sizeof(name), "cluster%d", index);
-	ret = of_property_match_string(args.np, "reg-names", name);
+	ret = of_perf_domain_get_sharing_cpumask(policy->cpu, "performance-domains",
+						 "#performance-domain-cells",
+						 policy->cpus, &args);
 	if (ret < 0)
 		return ret;
 
-	*reg_base = of_iomap(args.np, ret);
+	match = of_match_node(apple_soc_cpufreq_of_match, args.np);
+	of_node_put(args.np);
+	if (!match)
+		return -ENODEV;
+
+	*info = match->data;
+
+	*reg_base = of_iomap(args.np, 0);
 	if (IS_ERR(*reg_base))
 		return PTR_ERR(*reg_base);
-
-	for_each_possible_cpu(cpu) {
-		cpu_np = of_cpu_device_node_get(cpu);
-		if (!cpu_np)
-			continue;
-
-		ret = of_parse_phandle_with_args(cpu_np, "apple,freq-domain",
-						 "#freq-domain-cells", 0, &args);
-		of_node_put(cpu_np);
-		if (ret < 0)
-			continue;
-
-		if (index == args.args[0])
-			cpumask_set_cpu(cpu, policy->cpus);
-	}
 
 	return 0;
 }
@@ -196,8 +208,8 @@ static int apple_soc_cpufreq_init(struct cpufreq_policy *policy)
 	void __iomem *reg_base;
 	struct device *cpu_dev;
 	struct apple_cpu_priv *priv;
+	const struct apple_soc_cpufreq_info *info;
 	struct cpufreq_frequency_table *freq_table;
-	struct platform_device *pdev = cpufreq_get_driver_data();
 
 	cpu_dev = get_cpu_device(policy->cpu);
 	if (!cpu_dev) {
@@ -211,7 +223,7 @@ static int apple_soc_cpufreq_init(struct cpufreq_policy *policy)
 		return ret;
 	}
 
-	ret = apple_soc_cpufreq_find_cluster(policy, &reg_base);
+	ret = apple_soc_cpufreq_find_cluster(policy, &reg_base, &info);
 	if (ret) {
 		dev_err(cpu_dev, "%s: failed to get cluster info: %d\n", __func__, ret);
 		return ret;
@@ -236,12 +248,6 @@ static int apple_soc_cpufreq_init(struct cpufreq_policy *policy)
 		goto out_free_opp;
 	}
 
-	priv->info = of_device_get_match_data(&pdev->dev);
-	if (!priv->info) {
-		ret = -ENODEV;
-		goto out_free_opp;
-	}
-
 	ret = dev_pm_opp_init_cpufreq_table(cpu_dev, &freq_table);
 	if (ret) {
 		dev_err(cpu_dev, "failed to init cpufreq table: %d\n", ret);
@@ -263,6 +269,7 @@ static int apple_soc_cpufreq_init(struct cpufreq_policy *policy)
 
 	priv->cpu_dev = cpu_dev;
 	priv->reg_base = reg_base;
+	priv->info = info;
 	policy->driver_data = priv;
 	policy->freq_table = freq_table;
 
@@ -324,70 +331,22 @@ static struct cpufreq_driver apple_soc_cpufreq_driver = {
 	.attr		= apple_soc_cpufreq_hw_attr,
 };
 
-static int apple_soc_cpufreq_probe(struct platform_device *pdev)
+static int __init apple_soc_cpufreq_module_init(void)
 {
-	int ret;
+	if (!of_machine_is_compatible("apple,arm-platform"))
+		return -ENODEV;
 
-	apple_soc_cpufreq_driver.driver_data = pdev;
-
-	ret = cpufreq_register_driver(&apple_soc_cpufreq_driver);
-	if (ret)
-		return dev_err_probe(&pdev->dev, ret, "registering cpufreq failed\n");
-
-	return 0;
+	return cpufreq_register_driver(&apple_soc_cpufreq_driver);
 }
+module_init(apple_soc_cpufreq_module_init);
 
-static int apple_soc_cpufreq_remove(struct platform_device *pdev)
+static void __exit apple_soc_cpufreq_module_exit(void)
 {
 	cpufreq_unregister_driver(&apple_soc_cpufreq_driver);
-
-	return 0;
 }
+module_exit(apple_soc_cpufreq_module_exit);
 
-const struct apple_soc_cpufreq_info soc_t8103_info = {
-	.max_pstate = 15,
-	.cur_pstate_mask = APPLE_DVFS_STATUS_CUR_PS_T8103,
-	.cur_pstate_shift = APPLE_DVFS_STATUS_CUR_PS_SHIFT_T8103,
-};
-
-const struct apple_soc_cpufreq_info soc_t8112_info = {
-	.max_pstate = 31,
-	.cur_pstate_mask = APPLE_DVFS_STATUS_CUR_PS_T8112,
-	.cur_pstate_shift = APPLE_DVFS_STATUS_CUR_PS_SHIFT_T8112,
-};
-
-const struct apple_soc_cpufreq_info soc_default_info = {
-	.max_pstate = 15,
-	.cur_pstate_mask = 0, /* fallback */
-};
-
-static const struct of_device_id apple_soc_cpufreq_of_match[] = {
-	{
-		.compatible = "apple,t8103-soc-cpufreq",
-		.data = &soc_t8103_info,
-	},
-	{
-		.compatible = "apple,t8112-cpufreq",
-		.data = &soc_t8112_info,
-	},
-	{
-		.compatible = "apple,soc-cpufreq",
-		.data = &soc_default_info,
-	},
-	{}
-};
 MODULE_DEVICE_TABLE(of, apple_soc_cpufreq_of_match);
-
-static struct platform_driver apple_soc_cpufreq_plat_driver = {
-	.probe		= apple_soc_cpufreq_probe,
-	.remove		= apple_soc_cpufreq_remove,
-	.driver = {
-		.name	= "apple-soc-cpufreq",
-		.of_match_table = apple_soc_cpufreq_of_match,
-	},
-};
-module_platform_driver(apple_soc_cpufreq_plat_driver);
-
 MODULE_AUTHOR("Hector Martin <marcan@marcan.st>");
 MODULE_DESCRIPTION("Apple SoC CPU cluster DVFS driver");
 MODULE_LICENSE("GPL");
