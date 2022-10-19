@@ -66,6 +66,7 @@ pub mod revocable;
 pub mod security;
 pub mod str;
 pub mod task;
+pub mod time;
 pub mod workqueue;
 
 pub mod linked_list;
