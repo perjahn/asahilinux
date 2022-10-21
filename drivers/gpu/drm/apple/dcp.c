@@ -382,15 +382,13 @@ MODULE_DEVICE_TABLE(of, of_match);
  */
 static int dcp_suspend(struct device *dev)
 {
-	dcp_platform_shutdown(to_platform_device(dev));
+	dcp_poweroff(to_platform_device(dev));
 	return 0;
 }
 
 static int dcp_resume(struct device *dev)
 {
-	struct apple_dcp *dcp = platform_get_drvdata(to_platform_device(dev));
-
-	dcp_start_signal(dcp, false, dcp_started, NULL);
+	dcp_poweron(to_platform_device(dev));
 	return 0;
 }
 
