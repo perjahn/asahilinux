@@ -74,6 +74,7 @@ static const char * const iommu_group_resv_type_string[] = {
 	[IOMMU_RESV_RESERVED]			= "reserved",
 	[IOMMU_RESV_MSI]			= "msi",
 	[IOMMU_RESV_SW_MSI]			= "msi",
+	[IOMMU_RESV_TRANSLATED]			= "translated",
 };
 
 #define IOMMU_CMD_LINE_DMA_API		BIT(0)
@@ -2581,6 +2582,18 @@ struct iommu_resv_region *iommu_alloc_resv_region(phys_addr_t start,
 						  size_t length, int prot,
 						  enum iommu_resv_type type)
 {
+	if (type == IOMMU_RESV_TRANSLATED)
+		return NULL;
+
+	return iommu_alloc_resv_region_tr(start, 0, length, prot, type);
+}
+EXPORT_SYMBOL_GPL(iommu_alloc_resv_region);
+
+struct iommu_resv_region *iommu_alloc_resv_region_tr(phys_addr_t start,
+						     dma_addr_t dva_start,
+						     size_t length, int prot,
+						     enum iommu_resv_type type)
+{
 	struct iommu_resv_region *region;
 
 	region = kzalloc(sizeof(*region), GFP_KERNEL);
@@ -2589,12 +2602,14 @@ struct iommu_resv_region *iommu_alloc_resv_region(phys_addr_t start,
 
 	INIT_LIST_HEAD(&region->list);
 	region->start = start;
+	if (type == IOMMU_RESV_TRANSLATED)
+		region->dva = dva_start;
 	region->length = length;
 	region->prot = prot;
 	region->type = type;
 	return region;
 }
-EXPORT_SYMBOL_GPL(iommu_alloc_resv_region);
+EXPORT_SYMBOL_GPL(iommu_alloc_resv_region_tr);
 
 void iommu_set_default_passthrough(bool cmd_line)
 {
