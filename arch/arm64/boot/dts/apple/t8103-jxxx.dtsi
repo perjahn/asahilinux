@@ -12,6 +12,10 @@
 / {
 	aliases {
 		bluetooth0 = &bluetooth0;
+		dcp = &dcp;
+		dcpext = &dcpext;
+		disp0 = &display;
+		disp0_piodma = &disp0_piodma;
 		serial0 = &serial0;
 		serial2 = &serial2;
 		wifi0 = &wifi0;
@@ -32,6 +36,13 @@
 		};
 	};
 
+	reserved-memory {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+		/* To be filled by loader */
+	};
+
 	memory@800000000 {
 		device_type = "memory";
 		reg = <0x8 0 0x2 0>; /* To be filled by loader */
@@ -44,6 +55,10 @@
 
 &serial2 {
 	status = "okay";
+};
+
+&dcpext {
+	apple,connector-type = "USB-C";
 };
 
 &i2c0 {
