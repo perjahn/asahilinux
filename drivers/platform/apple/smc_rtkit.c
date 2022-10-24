@@ -35,7 +35,7 @@
 #define SMC_MSG				GENMASK(7, 0)
 #define SMC_RESULT			SMC_MSG
 
-#define SMC_RECV_TIMEOUT		100
+#define SMC_RECV_TIMEOUT		500
 
 struct apple_smc_rtkit {
 	struct device *dev;
