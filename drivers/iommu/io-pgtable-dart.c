@@ -451,8 +451,8 @@ apple_dart_alloc_pgtable(struct io_pgtable_cfg *cfg, void *cookie)
 	 * copied to the locked L1 table.
 	 */
 	if (cfg->quirks & IO_PGTABLE_QUIRK_APPLE_LOCKED) {
-	    if (cfg->apple_dart_cfg.n_ttbrs > 1)
-		goto out_free_data;
+		if (cfg->apple_dart_cfg.n_ttbrs > 1)
+			goto out_free_data;
 
 		data->pgd[0] = __dart_alloc_pages(DART_GRANULE(data), GFP_KERNEL);
 		if (!data->pgd[0])
