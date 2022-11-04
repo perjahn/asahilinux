@@ -251,4 +251,10 @@
 
 &gpu {
 	compatible = "apple,agx-t6002", "apple,agx-g13x";
+	//power-domains = <&ps_gfx>, <&ps_gfx_die1>;
+};
+
+&ps_gfx {
+	// On t6002, the die0 GPU power domain needs both AFR power domains
+	power-domains = <&ps_afr>, <&ps_afr_die1>;
 };
