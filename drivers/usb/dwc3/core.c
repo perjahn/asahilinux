@@ -1827,8 +1827,15 @@ static int dwc3_probe(struct platform_device *pdev)
 			}
 		}
 
-		if (of_device_is_compatible(dev->of_node, "apple,dwc3"))
+		if (of_device_is_compatible(dev->of_node, "apple,dwc3")) {
+			if (!IS_ENABLED(CONFIG_USB_ROLE_SWITCH)) {
+				dev_err(dev, "Apple DWC3 controllers require role switch support.\n");
+				ret = -EINVAL;
+				goto put_usb_psy;
+			}
+
 			dwc->role_switch_reset_quirk = true;
+		}
 	}
 
 	ret = reset_control_deassert(dwc->reset);
