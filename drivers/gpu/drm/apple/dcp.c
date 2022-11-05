@@ -23,6 +23,7 @@
 #include "dcp.h"
 #include "dcp-internal.h"
 #include "parser.h"
+#include "trace.h"
 
 #define APPLE_DCP_COPROC_CPU_CONTROL	 0x44
 #define APPLE_DCP_COPROC_CPU_CONTROL_RUN BIT(4)
@@ -90,6 +91,8 @@ void dcp_delayed_vblank(struct work_struct *work)
 static void dcp_recv_msg(void *cookie, u8 endpoint, u64 message)
 {
 	struct apple_dcp *dcp = cookie;
+
+	trace_dcp_recv_msg(dcp, endpoint, message);
 
 	switch (endpoint) {
 	case IOMFB_ENDPOINT:
@@ -209,6 +212,13 @@ int dcp_crtc_atomic_check(struct drm_crtc *crtc, struct drm_atomic_state *state)
 	return 0;
 }
 EXPORT_SYMBOL_GPL(dcp_crtc_atomic_check);
+
+void dcp_send_message(struct apple_dcp *dcp, u8 endpoint, u64 message)
+{
+	trace_dcp_send_msg(dcp, endpoint, message);
+	apple_rtkit_send_message(dcp->rtk, endpoint, message, NULL,
+				 false);
+}
 
 void dcp_link(struct platform_device *pdev, struct apple_crtc *crtc,
 	      struct apple_connector *connector)
