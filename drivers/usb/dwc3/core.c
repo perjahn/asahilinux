@@ -168,22 +168,12 @@ static void __dwc3_set_mode(struct work_struct *work)
 		}
 
 		if (dwc->desired_dr_role) {
-			/*
-			 * the first call to __dwc3_set_mode comes from
-			 * dwc3_drd_init. In that case dwc3_core_init has been
-			 * called but dwc->current_dr_role is zero such that
-			 * we must not reinitialize the core again here.
-			 */
-			if (dwc->role_switch_reset_quirk_initialized) {
-				ret = dwc3_core_init_for_resume(dwc);
-				if (ret) {
-					dev_err(dwc->dev,
-					    "failed to reinitialize core\n");
-					goto out;
-				}
+			ret = dwc3_core_init_for_resume(dwc);
+			if (ret) {
+				dev_err(dwc->dev,
+				    "failed to reinitialize core\n");
+				goto out;
 			}
-
-			dwc->role_switch_reset_quirk_initialized = 1;
 		} else {
 			goto out;
 		}
@@ -193,9 +183,10 @@ static void __dwc3_set_mode(struct work_struct *work)
 	 * When current_dr_role is not set, there's no role switching.
 	 * Only perform GCTL.CoreSoftReset when there's DRD role switching.
 	 */
-	if (dwc->current_dr_role && ((DWC3_IP_IS(DWC3) ||
+	if (dwc->role_switch_reset_quirk ||
+		(dwc->current_dr_role && ((DWC3_IP_IS(DWC3) ||
 			DWC3_VER_IS_PRIOR(DWC31, 190A)) &&
-			dwc->desired_dr_role != DWC3_GCTL_PRTCAP_OTG)) {
+			dwc->desired_dr_role != DWC3_GCTL_PRTCAP_OTG))) {
 		reg = dwc3_readl(dwc->regs, DWC3_GCTL);
 		reg |= DWC3_GCTL_CORESOFTRESET;
 		dwc3_writel(dwc->regs, DWC3_GCTL, reg);
@@ -1829,7 +1820,9 @@ static int dwc3_probe(struct platform_device *pdev)
 
 		if (of_device_is_compatible(dev->of_node, "apple,dwc3")) {
 			if (!IS_ENABLED(CONFIG_USB_ROLE_SWITCH)) {
-				dev_err(dev, "Apple DWC3 controllers require role switch support.\n");
+				dev_err(dev,
+				    "Apple DWC3 requires role switch support.\n"
+				    );
 				ret = -EINVAL;
 				goto put_usb_psy;
 			}
