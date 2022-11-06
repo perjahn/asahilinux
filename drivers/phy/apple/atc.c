@@ -109,11 +109,11 @@
 #define ACIOPHY_CROSSBAR_PROTOCOL_USB3_DP 0x10
 #define ACIOPHY_CROSSBAR_PROTOCOL_USB3_DP_SWAPPED 0x10
 #define ACIOPHY_CROSSBAR_PROTOCOL_DP 0x14
-#define ACIOPHY_CROSSBAR_DPMODE GENMASK(17, 5)
-#define ACIOPHY_CROSSBAR_DPMODE_NONE 0x0000
-#define ACIOPHY_CROSSBAR_DPMODE_UNK100 0x100
-#define ACIOPHY_CROSSBAR_DPMODE_UNK8 0x0008
-#define ACIOPHY_CROSSBAR_DP_BOTH_PMA BIT(18)
+#define ACIOPHY_CROSSBAR_DP_SINGLE_PMA GENMASK(16, 5)
+#define ACIOPHY_CROSSBAR_DP_SINGLE_PMA_NONE 0x0000
+#define ACIOPHY_CROSSBAR_DP_SINGLE_PMA_UNK100 0x100
+#define ACIOPHY_CROSSBAR_DP_SINGLE_PMA_UNK008 0x008
+#define ACIOPHY_CROSSBAR_DP_BOTH_PMA BIT(17)
 
 #define ACIOPHY_LANE_MODE 0x48
 #define ACIOPHY_LANE_MODE_RX0 GENMASK(2, 0)
@@ -411,7 +411,7 @@ static const struct {
 	[APPLE_ATCPHY_MODE_USB2] = {
 		.normal = {
 			.crossbar = ACIOPHY_CROSSBAR_PROTOCOL_USB3,
-			.crossbar_dp = ACIOPHY_CROSSBAR_DPMODE_NONE,
+			.crossbar_dp_single_pma = ACIOPHY_CROSSBAR_DP_SINGLE_PMA_NONE,
 			.crossbar_dp_both_pma = false,
 			.lane_mode = {ACIOPHY_LANE_MODE_OFF, ACIOPHY_LANE_MODE_OFF},
 			.dp_lane = {false, false},
@@ -419,7 +419,7 @@ static const struct {
 		},
 		.swapped = {
 			.crossbar = ACIOPHY_CROSSBAR_PROTOCOL_USB3_SWAPPED,
-			.crossbar_dp = ACIOPHY_CROSSBAR_DPMODE_NONE,
+			.crossbar_dp_single_pma = ACIOPHY_CROSSBAR_DP_SINGLE_PMA_NONE,
 			.crossbar_dp_both_pma = false,
 			.lane_mode = {ACIOPHY_LANE_MODE_OFF, ACIOPHY_LANE_MODE_OFF},
 			.dp_lane = {false, false},
@@ -431,7 +431,7 @@ static const struct {
 	[APPLE_ATCPHY_MODE_USB3] = {
 		.normal = {
 			.crossbar = ACIOPHY_CROSSBAR_PROTOCOL_USB3,
-			.crossbar_dp = ACIOPHY_CROSSBAR_DPMODE_NONE,
+			.crossbar_dp_single_pma = ACIOPHY_CROSSBAR_DP_SINGLE_PMA_NONE,
 			.crossbar_dp_both_pma = false,
 			.lane_mode = {ACIOPHY_LANE_MODE_USB3, ACIOPHY_LANE_MODE_OFF},
 			.dp_lane = {false, false},
@@ -439,7 +439,7 @@ static const struct {
 		},
 		.swapped = {
 			.crossbar = ACIOPHY_CROSSBAR_PROTOCOL_USB3_SWAPPED,
-			.crossbar_dp = ACIOPHY_CROSSBAR_DPMODE_NONE,
+			.crossbar_dp_single_pma = ACIOPHY_CROSSBAR_DP_SINGLE_PMA_NONE,
 			.crossbar_dp_both_pma = false,
 			.lane_mode = {ACIOPHY_LANE_MODE_OFF, ACIOPHY_LANE_MODE_USB3},
 			.dp_lane = {false, false},
@@ -451,7 +451,7 @@ static const struct {
 	[APPLE_ATCPHY_MODE_USB3_DP] = {
 		.normal = {
 			.crossbar = ACIOPHY_CROSSBAR_PROTOCOL_USB3_DP,
-			.crossbar_dp = ACIOPHY_CROSSBAR_DPMODE_UNK8,
+			.crossbar_dp_single_pma = ACIOPHY_CROSSBAR_DP_SINGLE_PMA_UNK008,
 			.crossbar_dp_both_pma = false,
 			.lane_mode = {ACIOPHY_LANE_MODE_USB3, ACIOPHY_LANE_MODE_DP},
 			.dp_lane = {false, true},
@@ -459,7 +459,7 @@ static const struct {
 		},
 		.swapped = {
 			.crossbar = ACIOPHY_CROSSBAR_PROTOCOL_USB3_DP_SWAPPED,
-			.crossbar_dp = ACIOPHY_CROSSBAR_DPMODE_UNK8,
+			.crossbar_dp_single_pma = ACIOPHY_CROSSBAR_DP_SINGLE_PMA_UNK008,
 			.crossbar_dp_both_pma = false,
 			.lane_mode = {ACIOPHY_LANE_MODE_DP, ACIOPHY_LANE_MODE_USB3},
 			.dp_lane = {true, false},
@@ -471,7 +471,7 @@ static const struct {
 	[APPLE_ATCPHY_MODE_USB4] = {
 		.normal = {
 			.crossbar = ACIOPHY_CROSSBAR_PROTOCOL_USB4,
-			.crossbar_dp = ACIOPHY_CROSSBAR_DPMODE_NONE,
+			.crossbar_dp_single_pma = ACIOPHY_CROSSBAR_DP_SINGLE_PMA_NONE,
 			.crossbar_dp_both_pma = false,
 			.lane_mode = {ACIOPHY_LANE_MODE_USB4, ACIOPHY_LANE_MODE_USB4},
 			.dp_lane = {false, false},
@@ -479,7 +479,7 @@ static const struct {
 		},
 		.swapped = {
 			.crossbar = ACIOPHY_CROSSBAR_PROTOCOL_USB4_SWAPPED,
-			.crossbar_dp = ACIOPHY_CROSSBAR_DPMODE_NONE,
+			.crossbar_dp_single_pma = ACIOPHY_CROSSBAR_DP_SINGLE_PMA_NONE,
 			.crossbar_dp_both_pma = false,
 			.lane_mode = {ACIOPHY_LANE_MODE_USB4, ACIOPHY_LANE_MODE_USB4},
 			.dp_lane = {false, false},
@@ -491,7 +491,7 @@ static const struct {
 	[APPLE_ATCPHY_MODE_DP] = {
 		.normal = {
 			.crossbar = ACIOPHY_CROSSBAR_PROTOCOL_DP,
-			.crossbar_dp = ACIOPHY_CROSSBAR_DPMODE_UNK100,
+			.crossbar_dp_single_pma = ACIOPHY_CROSSBAR_DP_SINGLE_PMA_UNK100,
 			.crossbar_dp_both_pma = true,
 			.lane_mode = {ACIOPHY_LANE_MODE_DP, ACIOPHY_LANE_MODE_DP},
 			.dp_lane = {true, true},
@@ -499,7 +499,7 @@ static const struct {
 		},
 		.swapped = {
 			.crossbar = ACIOPHY_CROSSBAR_PROTOCOL_DP,
-			.crossbar_dp = ACIOPHY_CROSSBAR_DPMODE_UNK100,
+			.crossbar_dp_single_pma = ACIOPHY_CROSSBAR_DP_SINGLE_PMA_UNK100,
 			.crossbar_dp_both_pma = true,
 			.lane_mode = {ACIOPHY_LANE_MODE_DP, ACIOPHY_LANE_MODE_DP},
 			.dp_lane = {true, true},
@@ -794,12 +794,15 @@ static void atcphy_configure_lanes(struct apple_atcphy *atcphy,
 	core_mask32(atcphy, ACIOPHY_CROSSBAR, ACIOPHY_CROSSBAR_PROTOCOL,
 		    FIELD_PREP(ACIOPHY_CROSSBAR_PROTOCOL, mode_cfg->crossbar));
 
-	core_mask32(atcphy, ACIOPHY_CROSSBAR, ACIOPHY_CROSSBAR_DPMODE,
-		    FIELD_PREP(ACIOPHY_CROSSBAR_DPMODE, mode_cfg->crossbar_dp));
+	core_mask32(atcphy, ACIOPHY_CROSSBAR, ACIOPHY_CROSSBAR_DP_SINGLE_PMA,
+		    FIELD_PREP(ACIOPHY_CROSSBAR_DP_SINGLE_PMA,
+			       mode_cfg->crossbar_dp_single_pma));
 	if (mode_cfg->crossbar_dp_both_pma)
-		core_set32(atcphy, ACIOPHY_CROSSBAR, ACIOPHY_CROSSBAR_DP_BOTH_PMA);
+		core_set32(atcphy, ACIOPHY_CROSSBAR,
+			   ACIOPHY_CROSSBAR_DP_BOTH_PMA);
 	else
-		core_clear32(atcphy, ACIOPHY_CROSSBAR, ACIOPHY_CROSSBAR_DP_BOTH_PMA);
+		core_clear32(atcphy, ACIOPHY_CROSSBAR,
+			     ACIOPHY_CROSSBAR_DP_BOTH_PMA);
 }
 
 static int atcphy_pipehandler_lock(struct apple_atcphy *atcphy)
@@ -2096,16 +2099,17 @@ static int atcphy_load_fuses(struct apple_atcphy *atcphy)
 	ret = nvmem_cell_read_variable_le_u32(
 		atcphy->dev, "cio3pll_dll_start_capcode_workaround",
 		&atcphy->fuses.cio3pll_dll_start_capcode[1]);
-	if (ret == -ENOENT) {
+	switch (ret) {
+	case 0:
+		atcphy->quirks.t8103_cio3pll_workaround = true;
+		break;
+	case -ENOENT:
 		atcphy->quirks.t8103_cio3pll_workaround = false;
-		goto success;
-	}
-	if (ret)
+		break;
+	default:
 		return ret;
+	}
 
-	atcphy->quirks.t8103_cio3pll_workaround = true;
-
-success:
 	trace_atcphy_fuses(atcphy);
 	return 0;
 }

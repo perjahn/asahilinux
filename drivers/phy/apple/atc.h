@@ -57,7 +57,7 @@ struct atcphy_dp_link_rate_configuration {
 
 struct atcphy_mode_configuration {
 	u32 crossbar;
-	u32 crossbar_dp;
+	u32 crossbar_dp_single_pma;
 	bool crossbar_dp_both_pma;
 	u32 lane_mode[2];
 	bool dp_lane[2];
