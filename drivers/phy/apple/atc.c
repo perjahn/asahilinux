@@ -909,6 +909,13 @@ static int atcphy_configure_pipehandler(struct apple_atcphy *atcphy,
 	if (ret)
 		return ret;
 
+	// TODO: macos seems to always clear it for USB3 - what about USB2/4?
+	clear32(atcphy->regs.pipehandler + PIPEHANDLER_NONSELECTED_OVERRIDE,
+	      PIPEHANDLER_NONSELECTED_NATIVE_RESET);
+
+	// TODO: why? without this superspeed devices sometimes come up as highspeed
+	msleep(500);
+
 	return 0;
 }
 
