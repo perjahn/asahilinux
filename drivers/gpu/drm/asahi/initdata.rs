@@ -669,7 +669,7 @@ impl<'a> InitDataBuilder::ver<'a> {
     }
 
     #[inline(never)]
-    pub(crate) fn build(&mut self) -> Result<GpuObject<InitData::ver>> {
+    pub(crate) fn build(&mut self) -> Result<Box<GpuObject<InitData::ver>>> {
         let inner: Box<InitData::ver> = box_in_place!(InitData::ver {
             unk_buf: self.alloc.shared.array_empty(0x4000)?,
             runtime_pointers: self.runtime_pointers()?,
@@ -677,7 +677,7 @@ impl<'a> InitDataBuilder::ver<'a> {
             fw_status: self.fw_status()?,
         })?;
 
-        self.alloc.shared.new_boxed(inner, |inner, ptr| {
+        Ok(Box::try_new(self.alloc.shared.new_boxed(inner, |inner, ptr| {
             Ok(place!(
                 ptr,
                 raw::InitData::ver {
@@ -705,6 +705,6 @@ impl<'a> InitDataBuilder::ver<'a> {
                     unk_b8: 0,
                 }
             ))
-        })
+        })?)?)
     }
 }
