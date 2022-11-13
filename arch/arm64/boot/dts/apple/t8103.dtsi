@@ -375,6 +375,7 @@
 			#iommu-cells = <1>;
 			interrupt-parent = <&aic>;
 			interrupts = <AIC_IRQ 445 IRQ_TYPE_LEVEL_HIGH>;
+			status = "disabled";
 		};
 
 		dcp_dart: iommu@23130c000 {
