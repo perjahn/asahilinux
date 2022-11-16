@@ -677,34 +677,37 @@ impl<'a> InitDataBuilder::ver<'a> {
             fw_status: self.fw_status()?,
         })?;
 
-        Ok(Box::try_new(self.alloc.shared.new_boxed(inner, |inner, ptr| {
-            Ok(place!(
-                ptr,
-                raw::InitData::ver {
-                    #[ver(V >= V13_0B4)]
-                    ver_info: Array::new([1, 1, 16, 1]),
-                    unk_buf: inner.unk_buf.gpu_pointer(),
-                    unk_8: 0,
-                    unk_c: 0,
-                    runtime_pointers: inner.runtime_pointers.gpu_pointer(),
-                    globals: inner.globals.gpu_pointer(),
-                    fw_status: inner.fw_status.gpu_pointer(),
-                    uat_page_size: 0x4000,
-                    uat_page_bits: 14,
-                    uat_num_levels: 3,
-                    uat_level_info: Array::new([
-                        Self::uat_level_info(self.cfg, 36, 8),
-                        Self::uat_level_info(self.cfg, 25, 2048),
-                        Self::uat_level_info(self.cfg, 14, 2048),
-                    ]),
-                    __pad0: Default::default(),
-                    host_mapped_fw_allocations: 1,
-                    unk_ac: 0,
-                    unk_b0: 0,
-                    unk_b4: 0,
-                    unk_b8: 0,
-                }
-            ))
-        })?)?)
+        Ok(Box::try_new(self.alloc.shared.new_boxed(
+            inner,
+            |inner, ptr| {
+                Ok(place!(
+                    ptr,
+                    raw::InitData::ver {
+                        #[ver(V >= V13_0B4)]
+                        ver_info: Array::new([1, 1, 16, 1]),
+                        unk_buf: inner.unk_buf.gpu_pointer(),
+                        unk_8: 0,
+                        unk_c: 0,
+                        runtime_pointers: inner.runtime_pointers.gpu_pointer(),
+                        globals: inner.globals.gpu_pointer(),
+                        fw_status: inner.fw_status.gpu_pointer(),
+                        uat_page_size: 0x4000,
+                        uat_page_bits: 14,
+                        uat_num_levels: 3,
+                        uat_level_info: Array::new([
+                            Self::uat_level_info(self.cfg, 36, 8),
+                            Self::uat_level_info(self.cfg, 25, 2048),
+                            Self::uat_level_info(self.cfg, 14, 2048),
+                        ]),
+                        __pad0: Default::default(),
+                        host_mapped_fw_allocations: 1,
+                        unk_ac: 0,
+                        unk_b0: 0,
+                        unk_b4: 0,
+                        unk_b8: 0,
+                    }
+                ))
+            },
+        )?)?)
     }
 }
