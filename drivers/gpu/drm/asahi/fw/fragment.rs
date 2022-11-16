@@ -65,7 +65,8 @@ pub(crate) mod raw {
     #[derive(Debug)]
     #[repr(C)]
     pub(crate) struct JobParameters1<'a> {
-        pub(crate) unk_0: U64,
+        pub(crate) utile_config: u32,
+        pub(crate) unk_4: u32,
         pub(crate) clear_pipeline: ClearPipelineBinding,
         pub(crate) unk_18: U64,
         pub(crate) scissor_array: U64,
@@ -115,8 +116,8 @@ pub(crate) mod raw {
         pub(crate) uuid1: u32,
         pub(crate) uuid2: u32,
         pub(crate) unk_18: U64,
-        pub(crate) tiles_per_mtile_y: u16,
-        pub(crate) tiles_per_mtile_x: u16,
+        pub(crate) utiles_per_mtile_y: u16,
+        pub(crate) utiles_per_mtile_x: u16,
         pub(crate) unk_24: u32,
         pub(crate) tile_counts: u32,
         pub(crate) unk_2c: u32,
