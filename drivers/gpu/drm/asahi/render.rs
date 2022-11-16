@@ -372,7 +372,8 @@ impl Renderer for Renderer::ver {
         let unk0 = 0x0;
         let unk1 = 0x0;
 
-        let mut utile_config = ((tile_info.utile_width / 16) << 12) | ((tile_info.utile_height / 16) << 14);
+        let mut utile_config =
+            ((tile_info.utile_width / 16) << 12) | ((tile_info.utile_height / 16) << 14);
         utile_config |= match cmdbuf.samples {
             1 => 0,
             2 => 1,
