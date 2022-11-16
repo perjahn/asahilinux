@@ -853,7 +853,7 @@ impl Renderer for Renderer::ver {
                             tvb_cluster_meta1: inner.scene.meta_1_pointer(),
                             utile_config: utile_config,
                             unk_4c: 0,
-                            unk_50: U64(0x88),   // fixed
+                            unk_50: U64(0x88), // fixed
                             tvb_heapmeta_2: inner.scene.tvb_heapmeta_pointer(),
                             unk_60: U64(0x0), // fixed
                             core_mask: Array::new([
