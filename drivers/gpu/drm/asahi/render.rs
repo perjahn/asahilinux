@@ -211,7 +211,7 @@ impl Renderer::ver {
             tpc_size,
             params: fw::vertex::raw::TilingParameters {
                 rgn_size,
-                ppp_multisamplectl: 0x88,
+                ppp_multisamplectl: cmdbuf.ppp_multisamplectl.try_into()?,
                 ppp_ctrl: cmdbuf.ppp_ctrl,
                 x_max: (width - 1) as u16,
                 y_max: (height - 1) as u16,
