@@ -181,8 +181,6 @@ impl Renderer::ver {
         let mtile_y2 = 2 * tiles_per_mtile_y;
         let mtile_y3 = 3 * tiles_per_mtile_y;
 
-        let mtile_stride = tiles_per_mtile_x * tiles_per_mtile_y;
-
         let rgn_entry_size = 5;
         // Macrotile stride in 32-bit words
         let rgn_size = align(rgn_entry_size * tiles_per_mtile * utiles_per_tile, 4) / 4;
@@ -492,8 +490,6 @@ impl Renderer for Renderer::ver {
                 };
 
                 let unk_flag = false;
-                let aux_fb_unk: u32 = if unk_flag { 4 } else { 8 };
-                let unk_378: u32 = aux_fb_unk * 2;
 
                 Ok(place!(
                     ptr,
@@ -576,7 +572,7 @@ impl Renderer for Renderer::ver {
                             utiles_per_mtile_x: tile_info.utiles_per_mtile_x as u16,
                             unk_24: 0x0,
                             tile_counts: ((tile_info.tiles_y - 1) << 12) | (tile_info.tiles_x - 1),
-                            unk_2c: aux_fb_unk,
+                            iogpu_unk_212: cmdbuf.iogpu_unk_212,
                             depth_clear_val1: F32::from_bits(cmdbuf.depth_clear_value),
                             stencil_clear_val1: cmdbuf.stencil_clear_value,
                             unk_35: 0x7, // clear flags? 2 : depth 4 : stencil?
@@ -625,7 +621,7 @@ impl Renderer for Renderer::ver {
                             stencil_buffer_ptr3: U64(cmdbuf.stencil_buffer_3),
                             stencil_meta_buffer_ptr3: U64(cmdbuf.stencil_meta_buffer_3),
                             unk_2f8: Default::default(),
-                            aux_fb_unk0: aux_fb_unk,
+                            iogpu_unk_212: cmdbuf.iogpu_unk_212,
                             unk_30c: 0x0,
                             aux_fb_info: aux_fb_info,
                             unk_320_padding: Default::default(),
@@ -642,7 +638,7 @@ impl Renderer for Renderer::ver {
                             stencil_clear_val2: cmdbuf.stencil_clear_value,
                             unk_375: 3, // sometimes 1
                             unk_376: 0x0,
-                            unk_378: unk_378,
+                            unk_378: cmdbuf.iogpu_unk_49,
                             unk_37c: 0x0,
                             unk_380: U64(0x0),
                             unk_388: U64(0x0),
