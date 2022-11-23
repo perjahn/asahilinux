@@ -10,6 +10,8 @@
 #include <linux/bitfield.h>
 #include <linux/power_supply.h>
 #include <linux/usb/typec.h>
+#include <linux/usb/typec_altmode.h>
+#include <linux/usb/typec_dp.h>
 
 #ifndef __TPS6598X_H__
 #define __TPS6598X_H__
@@ -133,6 +135,7 @@
 #define TPS_REG_INT_PD_SOFT_RESET			BIT(0)
 
 /* Apple-specific TPS_REG_INT_* bits */
+#define APPLE_CD_REG_INT_DP_SID_STATUS_UPDATE		(BIT(36) | BIT(37))
 #define APPLE_CD_REG_INT_DATA_STATUS_UPDATE		BIT(10)
 #define APPLE_CD_REG_INT_POWER_STATUS_UPDATE		BIT(9)
 #define APPLE_CD_REG_INT_STATUS_UPDATE			BIT(8)
@@ -241,6 +244,30 @@ struct tps6598x_rx_identity_reg {
 	struct usb_pd_identity identity;
 } __packed;
 
+/* TPS_REG_DP_SID_CONFIG */
+struct tps6598x_dp_sid_config {
+#define TPS_DP_SID_ENABLE_DP_SID BIT(0)
+#define TPS_DP_SID_ENABLE_DP_MODE BIT(1)
+	u8 config;
+	u8 capabilities;
+	u8 dfp_d_assignments;
+	u8 ufp_d_assignments;
+	u8 multifunction_config;
+#define TPS_DP_SID_AUTOENTRY_EN BIT(1)
+	u8 autoentry_config;
+} __packed;
+
+/* TPS_REG_DP_SID_STATUS */
+struct tps6598x_dp_sid_status {
+#define TPS_DP_SID_DETECTED BIT(0)
+#define TPS_DP_SID_ACTIVE BIT(1)
+	u8 status;
+	__le32 dp_status_tx;
+	__le32 dp_status_rx;
+	__le32 dp_configure;
+	__le32 dp_mode;
+} __packed;
+
 enum tps6598x_dp_state {
 	TPS_DPSTATE_IDLE,
 	TPS_DPSTATE_ACKED_ENTER_MODE,
@@ -265,6 +292,23 @@ struct tps6598x {
 	enum power_supply_usb_type usb_type;
 
 	u16 pwr_status;
+
+	/* DisplayPort altmode */
+	struct mutex dp_lock;
+	struct tps6598x_dp_sid_status dp_status;
+	enum tps6598x_dp_state dp_state;
+	struct typec_altmode *dp_port;
+	struct typec_altmode *dp_partner;
+	struct work_struct dp_work;
+	u32 dp_vdo_header;
+	bool dp_vdo_send_status;
 };
+
+int tps6598x_block_read(struct tps6598x *tps, u8 reg, void *val, size_t len);
+
+void tps6598x_displayport_update_dp_sid(struct tps6598x *tps);
+int tps6598x_displayport_register_port(struct tps6598x *tps);
+void tps6598x_displayport_unregister_port(struct tps6598x *tps);
+void tps6598x_displayport_unregister_partner(struct tps6598x *tps);
 
 #endif /* __TPS6598X_H__ */
