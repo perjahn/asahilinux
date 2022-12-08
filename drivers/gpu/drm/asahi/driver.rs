@@ -59,17 +59,19 @@ impl drv::Driver for AsahiDriver {
     }
 }
 
+kernel::define_of_id_table! {ASAHI_ID_TABLE, &'static hw::HwConfig, [
+    (of::DeviceId::Compatible(b"apple,agx-t8103"), Some(&hw::t8103::HWCONFIG)),
+    (of::DeviceId::Compatible(b"apple,agx-t8112"), Some(&hw::t8112::HWCONFIG)),
+    (of::DeviceId::Compatible(b"apple,agx-t6000"), Some(&hw::t600x::HWCONFIG_T6000)),
+    (of::DeviceId::Compatible(b"apple,agx-t6001"), Some(&hw::t600x::HWCONFIG_T6001)),
+    (of::DeviceId::Compatible(b"apple,agx-t6002"), Some(&hw::t600x::HWCONFIG_T6002)),
+]}
+
 impl platform::Driver for AsahiDriver {
     type Data = Arc<DeviceData>;
     type IdInfo = &'static hw::HwConfig;
 
-    kernel::define_of_id_table! {&'static hw::HwConfig, [
-        (of::DeviceId::Compatible(b"apple,agx-t8103"), Some(&hw::t8103::HWCONFIG)),
-        (of::DeviceId::Compatible(b"apple,agx-t8112"), Some(&hw::t8112::HWCONFIG)),
-        (of::DeviceId::Compatible(b"apple,agx-t6000"), Some(&hw::t600x::HWCONFIG_T6000)),
-        (of::DeviceId::Compatible(b"apple,agx-t6001"), Some(&hw::t600x::HWCONFIG_T6001)),
-        (of::DeviceId::Compatible(b"apple,agx-t6002"), Some(&hw::t600x::HWCONFIG_T6002)),
-    ]}
+    kernel::driver_of_id_table!(ASAHI_ID_TABLE);
 
     fn probe(
         pdev: &mut platform::Device,
@@ -132,3 +134,5 @@ impl platform::Driver for AsahiDriver {
         Ok(data)
     }
 }
+
+kernel::module_of_id_table!(MOD_TABLE, ASAHI_ID_TABLE);
