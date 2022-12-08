@@ -38,9 +38,23 @@ pub enum DeviceId {
 /// ```
 #[macro_export]
 macro_rules! define_of_id_table {
-    ($data_type:ty, $($t:tt)*) => {
-        $crate::define_id_table!(OF_DEVICE_ID_TABLE, $crate::of::DeviceId, $data_type, $($t)*);
+    ($name:ident, $data_type:ty, $($t:tt)*) => {
+        $crate::define_id_array!($name, $crate::of::DeviceId, $data_type, $($t)*);
     };
+}
+
+#[macro_export]
+macro_rules! driver_of_id_table {
+    ($name:expr) => {
+        $crate::driver_id_table!(OF_DEVICE_ID_TABLE, $crate::of::DeviceId, Self::IdInfo, $name);
+    };
+}
+
+#[macro_export]
+macro_rules! module_of_id_table {
+    ($item_name:ident, $table_name:ident) => {
+        $crate::module_id_table!($item_name, "of", $crate::of::DeviceId, $table_name);
+    }
 }
 
 // SAFETY: `ZERO` is all zeroed-out and `to_rawid` stores `offset` in `of_device_id::data`.
