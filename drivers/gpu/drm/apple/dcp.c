@@ -16,7 +16,9 @@
 #include <linux/apple-mailbox.h>
 #include <linux/soc/apple/rtkit.h>
 #include <linux/completion.h>
-#include "linux/workqueue.h"
+#include <linux/workqueue.h>
+#include <linux/pm_runtime.h>
+#include <linux/pm_domain.h>
 
 #include <drm/drm_fb_dma_helper.h>
 #include <drm/drm_fourcc.h>
@@ -251,6 +253,8 @@ int dcp_start(struct platform_device *pdev)
 	if (ret)
 		dev_err(dcp->dev, "Failed to start IOMFB endpoint: %d", ret);
 
+	dcp->iomfb_started = true;
+
 	return ret;
 }
 EXPORT_SYMBOL(dcp_start);
@@ -382,7 +386,6 @@ static int dcp_platform_probe(struct platform_device *pdev)
 	struct device_node *panel_np;
 	struct apple_dcp *dcp;
 	enum dcp_firmware_version fw_compat;
-	u32 cpu_ctrl;
 	int ret;
 
 	fw_compat = dcp_check_firmware_version(dev);
@@ -493,20 +496,33 @@ static int dcp_platform_probe(struct platform_device *pdev)
 	dcp->swapped_out_fbs =
 		(struct list_head)LIST_HEAD_INIT(dcp->swapped_out_fbs);
 
-	cpu_ctrl =
-		readl_relaxed(dcp->coproc_reg + APPLE_DCP_COPROC_CPU_CONTROL);
-	writel_relaxed(cpu_ctrl | APPLE_DCP_COPROC_CPU_CONTROL_RUN,
-		       dcp->coproc_reg + APPLE_DCP_COPROC_CPU_CONTROL);
-
 	dcp->rtk = devm_apple_rtkit_init(dev, dcp, "mbox", 0, &rtkit_ops);
 	if (IS_ERR(dcp->rtk))
 		return dev_err_probe(dev, PTR_ERR(dcp->rtk),
 				     "Failed to intialize RTKit");
 
-	ret = apple_rtkit_wake(dcp->rtk);
+	ret = devm_pm_runtime_enable(dev);
 	if (ret)
-		return dev_err_probe(dev, PTR_ERR(dcp->rtk),
-				     "Failed to boot RTKit: %d", ret);
+		return ret;
+
+	ret = pm_runtime_resume_and_get(dev);
+	if (ret)
+		return ret;
+
+	pm_runtime_set_autosuspend_delay(dev, 50);
+	pm_runtime_use_autosuspend(dev);
+
+	/*
+	 * On probe, DCP is probably in charge of the boot framebuffer.
+	 * Don't suspend it until we get an explicit poweroff request.
+	 */
+	dcp->awake = true;
+
+	/* We are now a client of the DCP/DISP0 genpd, so we can remove the always on flag */
+	if (dev->pm_domain) {
+		struct generic_pm_domain *genpd = pd_to_genpd(dev->pm_domain);
+		genpd->flags &= ~GENPD_FLAG_ALWAYS_ON;
+	}
 
 	return ret;
 }
@@ -523,22 +539,80 @@ static void dcp_platform_shutdown(struct platform_device *pdev)
 		iomfb_shutdown(dcp);
 }
 
+static int __maybe_unused dcp_runtime_suspend(struct device *dev)
+{
+	struct apple_dcp *dcp = dev_get_drvdata(dev);
+	u32 cpu_ctrl;
+	int ret;
+
+	dcp_sleep(dcp);
+
+	ret = apple_rtkit_idle(dcp->rtk);
+	if (ret) {
+		dev_err(dev, "Failed to shut down RTKit: %d", ret);
+		return ret;
+	}
+
+	cpu_ctrl =
+		readl_relaxed(dcp->coproc_reg + APPLE_DCP_COPROC_CPU_CONTROL);
+	writel_relaxed(cpu_ctrl & ~APPLE_DCP_COPROC_CPU_CONTROL_RUN,
+		       dcp->coproc_reg + APPLE_DCP_COPROC_CPU_CONTROL);
+
+	dev_info(dev, "Sleep\n");
+
+	return ret;
+}
+
+static int __maybe_unused dcp_runtime_resume(struct device *dev)
+{
+	struct apple_dcp *dcp = dev_get_drvdata(dev);
+	u32 cpu_ctrl;
+	int ret;
+
+	cpu_ctrl =
+		readl_relaxed(dcp->coproc_reg + APPLE_DCP_COPROC_CPU_CONTROL);
+	writel_relaxed(cpu_ctrl | APPLE_DCP_COPROC_CPU_CONTROL_RUN,
+		       dcp->coproc_reg + APPLE_DCP_COPROC_CPU_CONTROL);
+
+	ret = apple_rtkit_wake(dcp->rtk);
+	if (ret) {
+		dev_err(dev, "Failed to wake up RTKit: %d", ret);
+		return ret;
+	}
+
+	if (!dcp->iomfb_started)
+		return ret;
+
+	ret = apple_rtkit_start_ep(dcp->rtk, IOMFB_ENDPOINT);
+	if (ret < 0)
+		dev_err(dev, "Failed to start IOMFB endpoint after wake: %d", ret);
+
+	dev_info(dev, "Woke up\n");
+
+	return ret;
+}
+
 static const struct of_device_id of_match[] = {
 	{ .compatible = "apple,dcp" },
 	{}
 };
 MODULE_DEVICE_TABLE(of, of_match);
 
-static struct platform_driver apple_platform_driver = {
+static const struct dev_pm_ops dcp_pm_ops = {
+        SET_RUNTIME_PM_OPS(dcp_runtime_suspend, dcp_runtime_resume, NULL)
+};
+
+static struct platform_driver dcp_driver = {
 	.probe		= dcp_platform_probe,
 	.shutdown	= dcp_platform_shutdown,
 	.driver	= {
 		.name = "apple-dcp",
+		.pm = pm_ptr(&dcp_pm_ops),
 		.of_match_table	= of_match,
 	},
 };
 
-module_platform_driver(apple_platform_driver);
+module_platform_driver(dcp_driver);
 
 MODULE_AUTHOR("Alyssa Rosenzweig <alyssa@rosenzweig.io>");
 MODULE_DESCRIPTION("Apple Display Controller DRM driver");

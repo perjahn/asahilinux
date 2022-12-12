@@ -457,35 +457,27 @@ static const struct of_device_id of_match[] = {
 };
 MODULE_DEVICE_TABLE(of, of_match);
 
-#ifdef CONFIG_PM_SLEEP
-static int apple_platform_suspend(struct device *dev)
+static int __maybe_unused apple_platform_suspend(struct device *dev)
 {
 	struct apple_drm_private *apple = dev_get_drvdata(dev);
 
 	return drm_mode_config_helper_suspend(&apple->drm);
 }
 
-static int apple_platform_resume(struct device *dev)
+static int __maybe_unused apple_platform_resume(struct device *dev)
 {
 	struct apple_drm_private *apple = dev_get_drvdata(dev);
 
 	drm_mode_config_helper_resume(&apple->drm);
 	return 0;
 }
-
-static const struct dev_pm_ops apple_platform_pm_ops = {
-	.suspend	= apple_platform_suspend,
-	.resume		= apple_platform_resume,
-};
-#endif
+DEFINE_SIMPLE_DEV_PM_OPS(apple_platform_pm_ops, apple_platform_suspend, apple_platform_resume);
 
 static struct platform_driver apple_platform_driver = {
 	.driver	= {
 		.name = "apple-drm",
 		.of_match_table	= of_match,
-#ifdef CONFIG_PM_SLEEP
-		.pm = &apple_platform_pm_ops,
-#endif
+		.pm = pm_sleep_ptr(&apple_platform_pm_ops),
 	},
 	.probe		= apple_platform_probe,
 	.remove		= apple_platform_remove,
