@@ -1503,7 +1503,7 @@ static u8 drm_format_to_colorspace(u32 drm)
 
 	case DRM_FORMAT_ARGB2101010:
 	case DRM_FORMAT_XRGB2101010:
-		return 2;
+		return 12;
 	}
 
 	return 1;
@@ -1630,7 +1630,7 @@ void dcp_flush(struct drm_crtc *crtc, struct drm_atomic_state *state)
 	for (l = 0; l < SWAP_SURFACES; l++)
 		req->surf_null[l] = true;
 
-	l = 0;
+	l = 1;
 	for_each_oldnew_plane_in_state(state, plane, old_state, new_state, plane_idx) {
 		struct drm_framebuffer *fb = new_state->fb;
 		struct drm_gem_dma_object *obj;
