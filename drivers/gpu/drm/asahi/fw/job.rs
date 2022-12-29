@@ -14,7 +14,7 @@ pub(crate) struct JobMeta {
     pub(crate) fw_stamp: GpuWeakPointer<FwStamp>,
     pub(crate) stamp_value: EventValue,
     pub(crate) stamp_slot: u32,
-    pub(crate) unk_20: u32,
+    pub(crate) evctl_index: u32,
     pub(crate) unk_24: u32,
     pub(crate) uuid: u32,
     pub(crate) prev_stamp_value: u32,
