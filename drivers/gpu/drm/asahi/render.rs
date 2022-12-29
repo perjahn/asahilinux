@@ -770,7 +770,7 @@ impl Renderer for Renderer::ver {
                             fw_stamp: batches_frag.event().fw_stamp_pointer(),
                             stamp_value: next_frag,
                             stamp_slot: batches_frag.event().slot(),
-                            unk_20: 0, // fixed
+                            evctl_index: 0, // fixed
                             unk_24: if unk0 { 1 } else { 0 },
                             uuid: uuid_3d,
                             prev_stamp_value: batches_frag.event_value().counter(),
@@ -1048,7 +1048,7 @@ impl Renderer for Renderer::ver {
                             fw_stamp: batches_vtx.event().fw_stamp_pointer(),
                             stamp_value: next_vtx,
                             stamp_slot: batches_vtx.event().slot(),
-                            unk_20: 0, // fixed
+                            evctl_index: 0, // fixed
                             unk_24: if unk0 { 1 } else { 0 },
                             uuid: uuid_ta,
                             prev_stamp_value: batches_vtx.event_value().counter(),
