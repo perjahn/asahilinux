@@ -1023,7 +1023,8 @@ static void apple_nvme_reset_work(struct work_struct *work)
 		goto out;
 	}
 
-	if (anv->ctrl.ctrl_config & NVME_CC_ENABLE)
+	if (anv->ctrl.ctrl_config & NVME_CC_ENABLE &&
+	    !(anv->ctrl.ctrl_config & NVME_CC_SHN_MASK))
 		apple_nvme_disable(anv, false);
 
 	/* RTKit must be shut down cleanly for the (soft)-reset to work */
