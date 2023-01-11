@@ -57,6 +57,7 @@ impl RenderQueue::ver {
         event_manager: Arc<event::EventManager>,
         mgr: &buffer::BufferManager,
         id: u64,
+        priority: u32,
     ) -> Result<RenderQueue::ver> {
         mod_dev_dbg!(dev, "[RenderQueue {}] Creating renderer\n", id);
 
@@ -111,6 +112,7 @@ impl RenderQueue::ver {
                 notifier_list.weak_pointer(),
                 channel::PipeType::Vertex,
                 id,
+                priority,
             )?,
             wq_frag: workqueue::WorkQueue::new(
                 alloc,
@@ -119,6 +121,7 @@ impl RenderQueue::ver {
                 notifier_list.weak_pointer(),
                 channel::PipeType::Fragment,
                 id,
+                priority,
             )?,
             buffer,
             gpu_context,

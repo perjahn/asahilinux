@@ -345,7 +345,7 @@ impl File {
             bindings::drm_asahi_queue_type_DRM_ASAHI_QUEUE_RENDER => device
                 .data()
                 .gpu
-                .new_render_queue(vm, ualloc, ualloc_priv)?,
+                .new_render_queue(vm, ualloc, ualloc_priv, data.priority)?,
             _ => return Err(EINVAL),
         };
 
