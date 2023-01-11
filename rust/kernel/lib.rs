@@ -106,6 +106,7 @@ pub mod of;
 pub mod platform;
 pub mod types;
 pub mod user_ptr;
+pub mod xarray;
 
 #[cfg(CONFIG_KUNIT)]
 pub mod kunit;
