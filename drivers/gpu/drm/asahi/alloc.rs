@@ -351,7 +351,7 @@ impl Drop for SimpleAllocation {
                 vmap.as_mut_slice().fill(0x42);
             }
         }
-        self.obj.drop_mappings(self.vm.id());
+        self.obj.drop_vm_mappings(self.vm.id());
     }
 }
 
@@ -864,7 +864,7 @@ impl Drop for HeapAllocatorInner {
             );
         } else {
             for mut obj in self.backing_objects.drain(..) {
-                obj.0.drop_mappings(self.vm_id);
+                obj.0.drop_vm_mappings(self.vm_id);
             }
         }
     }

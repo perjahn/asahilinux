@@ -130,7 +130,7 @@ pub(crate) trait GpuManager: Send + Sync {
     fn init(&self) -> Result;
     fn update_globals(&self);
     fn alloc(&self) -> Guard<'_, Mutex<KernelAllocators>>;
-    fn new_vm(&self) -> Result<mmu::Vm>;
+    fn new_vm(&self, file_id: u64) -> Result<mmu::Vm>;
     fn bind_vm(&self, vm: &mmu::Vm) -> Result<mmu::VmBind>;
     fn new_renderer(
         &self,
@@ -655,8 +655,8 @@ impl GpuManager for GpuManager::ver {
         self.alloc.lock()
     }
 
-    fn new_vm(&self) -> Result<mmu::Vm> {
-        self.uat.new_vm(self.ids.vm.next())
+    fn new_vm(&self, file_id: u64) -> Result<mmu::Vm> {
+        self.uat.new_vm(self.ids.vm.next(), file_id)
     }
 
     fn bind_vm(&self, vm: &mmu::Vm) -> Result<mmu::VmBind> {

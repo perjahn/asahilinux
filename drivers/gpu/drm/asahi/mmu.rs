@@ -134,6 +134,7 @@ struct VmInner {
     binding: Option<slotalloc::Guard<SlotInner>>,
     bind_token: Option<slotalloc::SlotToken>,
     id: u64,
+    file_id: u64,
 }
 
 impl VmInner {
@@ -239,6 +240,7 @@ impl VmInner {
 #[derive(Clone)]
 pub(crate) struct Vm {
     id: u64,
+    file_id: u64,
     inner: Arc<Mutex<VmInner>>,
 }
 no_debug!(Vm);
@@ -655,6 +657,7 @@ impl Vm {
         cfg: &'static hw::HwConfig,
         is_kernel: bool,
         id: u64,
+        file_id: u64,
     ) -> Result<Vm> {
         let page_table = AppleUAT::new(
             &dev,
@@ -682,6 +685,7 @@ impl Vm {
 
         Ok(Vm {
             id,
+            file_id,
             inner: Arc::try_new(Mutex::new(VmInner {
                 dev,
                 min_va,
@@ -694,6 +698,7 @@ impl Vm {
                 bind_token: None,
                 active_users: 0,
                 id,
+                file_id,
             }))?,
         })
     }
@@ -827,6 +832,10 @@ impl Vm {
 
     pub(crate) fn id(&self) -> u64 {
         self.id
+    }
+
+    pub(crate) fn file_id(&self) -> u64 {
+        self.file_id
     }
 }
 
@@ -1008,8 +1017,15 @@ impl Uat {
         ))
     }
 
-    pub(crate) fn new_vm(&self, id: u64) -> Result<Vm> {
-        Vm::new(self.dev.clone(), self.inner.clone(), self.cfg, false, id)
+    pub(crate) fn new_vm(&self, id: u64, file_id: u64) -> Result<Vm> {
+        Vm::new(
+            self.dev.clone(),
+            self.inner.clone(),
+            self.cfg,
+            false,
+            id,
+            file_id,
+        )
     }
 
     #[inline(never)]
@@ -1049,8 +1065,8 @@ impl Uat {
         let pagetables_rgn = Self::map_region(dev, c_str!("pagetables"), PAGETABLES_SIZE, true)?;
 
         dev_info!(dev, "MMU: Creating kernel page tables\n");
-        let kernel_lower_vm = Vm::new(dev.clone(), inner.clone(), cfg, false, 1)?;
-        let kernel_vm = Vm::new(dev.clone(), inner.clone(), cfg, true, 0)?;
+        let kernel_lower_vm = Vm::new(dev.clone(), inner.clone(), cfg, false, 1, 0)?;
+        let kernel_vm = Vm::new(dev.clone(), inner.clone(), cfg, true, 0, 0)?;
 
         dev_info!(dev, "MMU: Kernel page tables created\n");
 
