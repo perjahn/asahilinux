@@ -46,8 +46,8 @@ impl drm::file::DriverFile for File {
         debug::update_debug_flags();
 
         let gpu = &device.data().gpu;
-        let vm = gpu.new_vm()?;
         let id = gpu.ids().file.next();
+        let vm = gpu.new_vm(id)?;
 
         mod_dev_dbg!(device, "[File {}]: DRM device opened", id);
         mod_dev_dbg!(device, "[File {}]: Creating allocators", id);
@@ -291,8 +291,8 @@ impl File {
         }
     }
 
-    pub(crate) fn vm_id(&self) -> u64 {
-        self.vm.id()
+    pub(crate) fn file_id(&self) -> u64 {
+        self.id
     }
 }
 
