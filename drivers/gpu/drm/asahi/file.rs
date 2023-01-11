@@ -13,17 +13,25 @@ use crate::{alloc, buffer, driver, gem, gpu, mmu, render};
 use kernel::drm::gem::BaseObject;
 use kernel::prelude::*;
 use kernel::sync::{smutex::Mutex, Arc};
-use kernel::{bindings, drm};
+use kernel::{bindings, drm, xarray};
 
 const DEBUG_CLASS: DebugFlags = DebugFlags::File;
 
-pub(crate) struct File {
-    id: u64,
-    renderer: Box<dyn render::Renderer>,
+struct Vm {
     dummy_obj: gem::ObjectRef,
     ualloc: Arc<Mutex<alloc::DefaultAllocator>>,
     ualloc_priv: Arc<Mutex<alloc::DefaultAllocator>>,
     vm: mmu::Vm,
+}
+
+pub(crate) trait Queue: Send + Sync {
+    fn submit(&self, cmd: &bindings::drm_asahi_submit, id: u64) -> Result;
+}
+
+pub(crate) struct File {
+    id: u64,
+    vms: xarray::XArray<Box<Vm>>,
+    queues: xarray::XArray<Arc<Box<dyn Queue>>>,
 }
 
 pub(crate) type DrmFile = drm::file::File<File>;
@@ -31,7 +39,7 @@ pub(crate) type DrmFile = drm::file::File<File>;
 const VM_SHADER_START: u64 = 0x11_00000000;
 const VM_SHADER_END: u64 = 0x11_ffffffff;
 const VM_USER_START: u64 = 0x20_00000000;
-const VM_USER_END: u64 = 0x5f_00000000;
+const VM_USER_END: u64 = 0x5f_ffffffff;
 
 const VM_DRV_GPU_START: u64 = 0x60_00000000;
 const VM_DRV_GPU_END: u64 = 0x60_ffffffff;
@@ -47,51 +55,12 @@ impl drm::file::DriverFile for File {
 
         let gpu = &device.data().gpu;
         let id = gpu.ids().file.next();
-        let vm = gpu.new_vm(id)?;
 
         mod_dev_dbg!(device, "[File {}]: DRM device opened", id);
-        mod_dev_dbg!(device, "[File {}]: Creating allocators", id);
-        let ualloc = Arc::try_new(Mutex::new(alloc::DefaultAllocator::new(
-            device,
-            &vm,
-            VM_DRV_GPU_START,
-            VM_DRV_GPU_END,
-            buffer::PAGE_SIZE,
-            mmu::PROT_GPU_SHARED_RW,
-            512 * 1024,
-            true,
-            fmt!("File {} GPU Shared", id),
-        )?))?;
-        let ualloc_priv = Arc::try_new(Mutex::new(alloc::DefaultAllocator::new(
-            device,
-            &vm,
-            VM_DRV_GPUFW_START,
-            VM_DRV_GPUFW_END,
-            buffer::PAGE_SIZE,
-            mmu::PROT_GPU_FW_PRIV_RW,
-            64 * 1024,
-            true,
-            fmt!("File {} GPU FW Private", id),
-        )?))?;
-
-        let mut dummy_obj = gem::new_kernel_object(device, 0x4000)?;
-        dummy_obj.vmap()?.as_mut_slice().fill(0);
-        dummy_obj.map_at(&vm, VM_UNK_PAGE, mmu::PROT_GPU_SHARED_RW, true)?;
-
-        mod_dev_dbg!(device, "[File {}]: Creating renderer", id);
-        let renderer = device
-            .data()
-            .gpu
-            .new_renderer(ualloc.clone(), ualloc_priv.clone())?;
-
-        mod_dev_dbg!(device, "[File {}]: Opened successfully", id);
         Ok(Box::try_new(Self {
             id,
-            vm,
-            ualloc,
-            ualloc_priv,
-            dummy_obj,
-            renderer,
+            vms: xarray::XArray::new(xarray::flags::ALLOC1)?,
+            queues: xarray::XArray::new(xarray::flags::ALLOC1)?,
         })?)
     }
 }
@@ -120,6 +89,7 @@ impl File {
             param!(CHIP_ID) => gpu.get_cfg().chip_id as u64,
             param!(FEAT_COMPAT) => gpu.get_cfg().gpu_feat_compat as u64,
             param!(FEAT_INCOMPAT) => gpu.get_cfg().gpu_feat_incompat as u64,
+            param!(VM_PAGE_SIZE) => mmu::UAT_PGSZ as u64,
             param!(VM_USER_START) => VM_USER_START,
             param!(VM_USER_END) => VM_USER_END,
             param!(VM_SHADER_START) => VM_SHADER_START,
@@ -132,6 +102,271 @@ impl File {
         Ok(0)
     }
 
+    pub(crate) fn vm_create(
+        device: &AsahiDevice,
+        data: &mut bindings::drm_asahi_vm_create,
+        file: &DrmFile,
+    ) -> Result<u32> {
+        let gpu = &device.data().gpu;
+        let file_id = file.inner().id;
+        let vm = gpu.new_vm(file_id)?;
+
+        let resv = file.inner().vms.reserve()?;
+        let id: u32 = resv.index().try_into()?;
+
+        mod_dev_dbg!(device, "[File {} VM {}]: VM Create", file_id, id);
+        mod_dev_dbg!(device, "[File {} VM {}]: Creating allocators", file_id, id);
+        let ualloc = Arc::try_new(Mutex::new(alloc::DefaultAllocator::new(
+            device,
+            &vm,
+            VM_DRV_GPU_START,
+            VM_DRV_GPU_END,
+            buffer::PAGE_SIZE,
+            mmu::PROT_GPU_SHARED_RW,
+            512 * 1024,
+            true,
+            fmt!("File {} VM {} GPU Shared", file_id, id),
+        )?))?;
+        let ualloc_priv = Arc::try_new(Mutex::new(alloc::DefaultAllocator::new(
+            device,
+            &vm,
+            VM_DRV_GPUFW_START,
+            VM_DRV_GPUFW_END,
+            buffer::PAGE_SIZE,
+            mmu::PROT_GPU_FW_PRIV_RW,
+            64 * 1024,
+            true,
+            fmt!("File {} VM {} GPU FW Private", file_id, id),
+        )?))?;
+
+        mod_dev_dbg!(
+            device,
+            "[File {} VM {}]: Creating dummy object",
+            file_id,
+            id
+        );
+        let mut dummy_obj = gem::new_kernel_object(device, 0x4000)?;
+        dummy_obj.vmap()?.as_mut_slice().fill(0);
+        dummy_obj.map_at(&vm, VM_UNK_PAGE, mmu::PROT_GPU_SHARED_RW, true)?;
+
+        mod_dev_dbg!(device, "[File {} VM {}]: VM created", file_id, id);
+        resv.store(Box::try_new(Vm {
+            dummy_obj,
+            ualloc,
+            ualloc_priv,
+            vm,
+        })?)?;
+
+        data.vm_id = id;
+
+        Ok(0)
+    }
+
+    pub(crate) fn vm_destroy(
+        _device: &AsahiDevice,
+        data: &mut bindings::drm_asahi_vm_destroy,
+        file: &DrmFile,
+    ) -> Result<u32> {
+        if file.inner().vms.remove(data.vm_id as usize).is_none() {
+            Err(ENOENT)
+        } else {
+            Ok(0)
+        }
+    }
+
+    pub(crate) fn gem_create(
+        device: &AsahiDevice,
+        data: &mut bindings::drm_asahi_gem_create,
+        file: &DrmFile,
+    ) -> Result<u32> {
+        mod_dev_dbg!(
+            device,
+            "[File {}]: IOCTL: gem_create size={:#x?}",
+            file.inner().id,
+            data.size
+        );
+
+        if (data.flags & !bindings::ASAHI_GEM_WRITEBACK) != 0 {
+            return Err(EINVAL);
+        }
+
+        let bo = gem::new_object(device, data.size.try_into()?, data.flags)?;
+
+        let handle = bo.gem.create_handle(file)?;
+        data.handle = handle;
+
+        mod_dev_dbg!(
+            device,
+            "[File {}]: IOCTL: gem_create size={:#x} handle={:#x?}",
+            file.inner().id,
+            data.size,
+            data.handle
+        );
+
+        Ok(0)
+    }
+
+    pub(crate) fn gem_mmap_offset(
+        device: &AsahiDevice,
+        data: &mut bindings::drm_asahi_gem_mmap_offset,
+        file: &DrmFile,
+    ) -> Result<u32> {
+        mod_dev_dbg!(
+            device,
+            "[File {}]: IOCTL: gem_mmap_offset handle={:#x?}",
+            file.inner().id,
+            data.handle
+        );
+
+        if data.flags != 0 {
+            return Err(EINVAL);
+        }
+
+        let bo = gem::lookup_handle(file, data.handle)?;
+        data.offset = bo.gem.create_mmap_offset()?;
+        Ok(0)
+    }
+
+    pub(crate) fn gem_bind(
+        device: &AsahiDevice,
+        data: &mut bindings::drm_asahi_gem_bind,
+        file: &DrmFile,
+    ) -> Result<u32> {
+        mod_dev_dbg!(
+            device,
+            "[File {} VM {}]: IOCTL: gem_bind handle={:#x?} flags={:#x?} {:#x?}:{:#x?} -> {:#x?}",
+            file.inner().id,
+            data.vm_id,
+            data.handle,
+            data.flags,
+            data.offset,
+            data.range,
+            data.addr
+        );
+
+        if data.offset != 0 {
+            return Err(EINVAL); // Not supported yet
+        }
+
+        if (data.addr | data.range) as usize & mmu::UAT_PGMSK != 0 {
+            return Err(EINVAL); // Must be page aligned
+        }
+
+        if (data.flags & !(bindings::ASAHI_BIND_READ | bindings::ASAHI_BIND_WRITE)) != 0 {
+            return Err(EINVAL);
+        }
+
+        let mut bo = gem::lookup_handle(file, data.handle)?;
+
+        if data.range != bo.size().try_into()? {
+            return Err(EINVAL); // Not supported yet
+        }
+
+        let start = data.addr;
+        let end = data.addr + data.range - 1;
+
+        if (VM_SHADER_START..=VM_SHADER_END).contains(&start) {
+            if !(VM_SHADER_START..=VM_SHADER_END).contains(&end) {
+                return Err(EINVAL); // Invalid map range
+            }
+        } else if (VM_USER_START..=VM_USER_END).contains(&start) {
+            if !(VM_USER_START..=VM_USER_END).contains(&end) {
+                return Err(EINVAL); // Invalid map range
+            }
+        } else {
+            return Err(EINVAL); // Invalid map range
+        }
+
+        // Just in case
+        if end >= VM_DRV_GPU_START {
+            return Err(EINVAL);
+        }
+
+        let prot = if data.flags & bindings::ASAHI_BIND_READ != 0 {
+            if data.flags & bindings::ASAHI_BIND_WRITE != 0 {
+                mmu::PROT_GPU_SHARED_RW
+            } else {
+                mmu::PROT_GPU_SHARED_RO
+            }
+        } else if data.flags & bindings::ASAHI_BIND_WRITE != 0 {
+            mmu::PROT_GPU_SHARED_WO
+        } else {
+            return Err(EINVAL); // Must specify one of ASAHI_BIND_{READ,WRITE}
+        };
+
+        // Clone it immediately so we aren't holding the XArray lock
+        let vm = file
+            .inner()
+            .vms
+            .get(data.vm_id.try_into()?)
+            .ok_or(ENOENT)?
+            .vm
+            .clone();
+
+        bo.map_at(&vm, start, prot, true)?;
+
+        Ok(0)
+    }
+
+    pub(crate) fn queue_create(
+        device: &AsahiDevice,
+        data: &mut bindings::drm_asahi_queue_create,
+        file: &DrmFile,
+    ) -> Result<u32> {
+        let file_id = file.inner().id;
+
+        mod_dev_dbg!(
+            device,
+            "[File {} VM {}]: Creating queue type={:?} prio={:?} flags={:#x?}",
+            file_id,
+            data.vm_id,
+            data.queue_type,
+            data.priority,
+            data.flags,
+        );
+
+        if data.flags != 0 {
+            return Err(EINVAL);
+        }
+
+        if data.priority > 3 {
+            return Err(EINVAL);
+        }
+
+        let resv = file.inner().queues.reserve()?;
+        let file_vm = file.inner().vms.get(data.vm_id.try_into()?).ok_or(ENOENT)?;
+        let vm = file_vm.vm.clone();
+        let ualloc = file_vm.ualloc.clone();
+        let ualloc_priv = file_vm.ualloc_priv.clone();
+        // Drop the vms lock eagerly
+        core::mem::drop(file_vm);
+
+        let queue = match data.queue_type {
+            bindings::drm_asahi_queue_type_DRM_ASAHI_QUEUE_RENDER => device
+                .data()
+                .gpu
+                .new_render_queue(vm, ualloc, ualloc_priv)?,
+            _ => return Err(EINVAL),
+        };
+
+        data.queue_id = resv.index().try_into()?;
+        resv.store(Arc::try_new(queue)?)?;
+
+        Ok(0)
+    }
+
+    pub(crate) fn queue_destroy(
+        _device: &AsahiDevice,
+        data: &mut bindings::drm_asahi_queue_destroy,
+        file: &DrmFile,
+    ) -> Result<u32> {
+        if file.inner().queues.remove(data.queue_id as usize).is_none() {
+            Err(ENOENT)
+        } else {
+            Ok(0)
+        }
+    }
+
     pub(crate) fn submit(
         device: &AsahiDevice,
         data: &mut bindings::drm_asahi_submit,
@@ -142,152 +377,36 @@ impl File {
         let gpu = &device.data().gpu;
         gpu.update_globals();
 
+        /* Upgrade to Arc<T> to drop the XArray lock early */
+        let queue: Arc<Box<dyn Queue>> = file
+            .inner()
+            .queues
+            .get(data.queue_id.try_into()?)
+            .ok_or(ENOENT)?
+            .borrow()
+            .into();
+
         let id = gpu.ids().submission.next();
         mod_dev_dbg!(
             device,
-            "[File {}]: IOCTL: submit (submission ID: {})",
+            "[File {} Queue {}]: IOCTL: submit (submission ID: {})",
             file.inner().id,
+            data.queue_id,
             id
         );
-        let inner = file.inner();
-        let ret = inner.renderer.render(&inner.vm, &inner.ualloc, data, id);
+        let ret = queue.submit(data, id);
         if let Err(e) = ret {
             dev_info!(
                 device,
-                "[File {}]: IOCTL: submit failed! (submission ID: {} err: {:?})",
+                "[File {} Queue {}]: IOCTL: submit failed! (submission ID: {} err: {:?})",
                 file.inner().id,
+                data.queue_id,
                 id,
                 e
             );
             Err(e)
         } else {
             Ok(0)
-        }
-    }
-
-    pub(crate) fn wait(
-        device: &AsahiDevice,
-        _data: &mut bindings::drm_asahi_wait,
-        file: &DrmFile,
-    ) -> Result<u32> {
-        mod_dev_dbg!(device, "[File {}]: IOCTL: wait", file.inner().id);
-        Ok(0)
-    }
-
-    pub(crate) fn create_bo(
-        device: &AsahiDevice,
-        data: &mut bindings::drm_asahi_create_bo,
-        file: &DrmFile,
-    ) -> Result<u32> {
-        mod_dev_dbg!(
-            device,
-            "[File {}]: IOCTL: create_bo size={:#x?}",
-            file.inner().id,
-            data.size
-        );
-
-        let mut bo = gem::new_object(device, data.size as usize, data.flags)?;
-
-        if data.flags & bindings::ASAHI_BO_PIPELINE != 0 {
-            let iova = bo.map_into_range(
-                &file.inner().vm,
-                VM_SHADER_START,
-                VM_SHADER_END,
-                mmu::UAT_PGSZ as u64,
-                mmu::PROT_GPU_SHARED_RW,
-                true,
-            )?;
-            data.offset = iova as u64 - VM_SHADER_START;
-        } else {
-            let iova = bo.map_into_range(
-                &file.inner().vm,
-                VM_USER_START,
-                VM_USER_END,
-                mmu::UAT_PGSZ as u64,
-                mmu::PROT_GPU_SHARED_RW,
-                true,
-            )?;
-            data.offset = iova as u64;
-        }
-        let handle = bo.gem.create_handle(file)?;
-        data.handle = handle;
-
-        mod_dev_dbg!(
-            device,
-            "[File {}]: IOCTL: create_bo size={:#x} offset={:#x?} handle={:#x?}",
-            file.inner().id,
-            data.size,
-            data.offset,
-            data.handle
-        );
-
-        Ok(0)
-    }
-
-    pub(crate) fn mmap_bo(
-        device: &AsahiDevice,
-        data: &mut bindings::drm_asahi_mmap_bo,
-        file: &DrmFile,
-    ) -> Result<u32> {
-        mod_dev_dbg!(
-            device,
-            "[File {}]: IOCTL: mmap_bo handle={:#x?}",
-            file.inner().id,
-            data.handle
-        );
-
-        let bo = gem::Object::lookup_handle(file, data.handle)?;
-
-        data.offset = bo.create_mmap_offset()?;
-        Ok(0)
-    }
-
-    pub(crate) fn get_bo_offset(
-        device: &AsahiDevice,
-        data: &mut bindings::drm_asahi_get_bo_offset,
-        file: &DrmFile,
-    ) -> Result<u32> {
-        mod_dev_dbg!(
-            device,
-            "[File {}]: IOCTL: get_bo_offset handle={:#x?}",
-            file.inner().id,
-            data.handle
-        );
-
-        let mut bo = gem::ObjectRef::new(gem::Object::lookup_handle(file, data.handle)?);
-
-        // This can race other threads. Only one will win the map and the
-        // others will return EBUSY.
-        let iova = bo.map_into_range(
-            &file.inner().vm,
-            VM_USER_START,
-            VM_USER_END,
-            mmu::UAT_PGSZ as u64,
-            mmu::PROT_GPU_SHARED_RW,
-            true,
-        );
-
-        if let Some(iova) = bo.iova(file.inner().vm.id()) {
-            // If we have a mapping, call it good.
-            data.offset = iova as u64;
-            mod_dev_dbg!(
-                device,
-                "[File {}]: IOCTL: get_bo_offset handle={:#x?} offset={:#x?}",
-                file.inner().id,
-                data.handle,
-                iova
-            );
-            Ok(0)
-        } else {
-            // Otherwise return the error, or a generic one if something
-            // went very wrong and we lost the mapping.
-            dev_err!(
-                device,
-                "[File {}]: IOCTL: get_bo_offset failed",
-                file.inner().id
-            );
-            iova?;
-            Err(EIO)
         }
     }
 

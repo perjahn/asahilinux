@@ -12,7 +12,7 @@ use crate::driver::AsahiDevice;
 use crate::fw::types::*;
 use crate::gpu::GpuManager;
 use crate::util::*;
-use crate::{alloc, buffer, channel, driver, event, fw, gem, gpu, microseq, mmu, workqueue};
+use crate::{alloc, buffer, channel, driver, event, file, fw, gem, gpu, microseq, mmu, workqueue};
 use crate::{box_in_place, inner_ptr, inner_weak_ptr, place};
 use core::mem::MaybeUninit;
 use kernel::bindings;
@@ -26,19 +26,11 @@ const DEBUG_CLASS: DebugFlags = DebugFlags::Render;
 
 const TILECTL_DISABLE_CLUSTERING: u32 = 1u32 << 0;
 
-pub(crate) trait Renderer: Send + Sync {
-    fn render(
-        &self,
-        vm: &mmu::Vm,
-        ualloc: &Arc<Mutex<alloc::DefaultAllocator>>,
-        cmd: &bindings::drm_asahi_submit,
-        id: u64,
-    ) -> Result;
-}
-
 #[versions(AGX)]
-pub(crate) struct Renderer {
+pub(crate) struct RenderQueue {
     dev: AsahiDevice,
+    vm: mmu::Vm,
+    ualloc: Arc<Mutex<alloc::DefaultAllocator>>,
     wq_vtx: Arc<workqueue::WorkQueue>,
     wq_frag: Arc<workqueue::WorkQueue>,
     buffer: buffer::Buffer::ver,
@@ -49,25 +41,27 @@ pub(crate) struct Renderer {
 }
 
 #[versions(AGX)]
-unsafe impl Send for Renderer::ver {}
+unsafe impl Send for RenderQueue::ver {}
 #[versions(AGX)]
-unsafe impl Sync for Renderer::ver {}
+unsafe impl Sync for RenderQueue::ver {}
 
 #[versions(AGX)]
-impl Renderer::ver {
+impl RenderQueue::ver {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         dev: &AsahiDevice,
+        vm: mmu::Vm,
         alloc: &mut gpu::KernelAllocators,
         ualloc: Arc<Mutex<alloc::DefaultAllocator>>,
         ualloc_priv: Arc<Mutex<alloc::DefaultAllocator>>,
         event_manager: Arc<event::EventManager>,
         mgr: &buffer::BufferManager,
         id: u64,
-    ) -> Result<Renderer::ver> {
-        mod_dev_dbg!(dev, "[Renderer {}] Creating renderer\n", id);
+    ) -> Result<RenderQueue::ver> {
+        mod_dev_dbg!(dev, "[RenderQueue {}] Creating renderer\n", id);
 
         let data = dev.data();
-        let buffer = buffer::Buffer::ver::new(&*data.gpu, alloc, ualloc, ualloc_priv, mgr)?;
+        let buffer = buffer::Buffer::ver::new(&*data.gpu, alloc, ualloc.clone(), ualloc_priv, mgr)?;
 
         let tvb_blocks = {
             let lock = crate::THIS_MODULE.kernel_param_lock();
@@ -106,8 +100,10 @@ impl Renderer::ver {
                 },
             )?)?;
 
-        let ret = Ok(Renderer::ver {
+        let ret = Ok(RenderQueue::ver {
             dev: dev.clone(),
+            vm,
+            ualloc,
             wq_vtx: workqueue::WorkQueue::new(
                 alloc,
                 event_manager.clone(),
@@ -131,12 +127,12 @@ impl Renderer::ver {
             id,
         });
 
-        mod_dev_dbg!(dev, "[Renderer {}] Renderer created\n", id);
+        mod_dev_dbg!(dev, "[RenderQueue {}] RenderQueue created\n", id);
         ret
     }
 
     fn get_tiling_params(
-        cmdbuf: &bindings::drm_asahi_cmdbuf,
+        cmdbuf: &bindings::drm_asahi_cmd_render,
         num_clusters: u32,
     ) -> Result<buffer::TileInfo> {
         let width: u32 = cmdbuf.fb_width;
@@ -256,18 +252,12 @@ impl Renderer::ver {
 }
 
 #[versions(AGX)]
-impl Renderer for Renderer::ver {
-    fn render(
-        &self,
-        vm: &mmu::Vm,
-        ualloc: &Arc<Mutex<alloc::DefaultAllocator>>,
-        cmd: &bindings::drm_asahi_submit,
-        id: u64,
-    ) -> Result {
+impl file::Queue for RenderQueue::ver {
+    fn submit(&self, cmd: &bindings::drm_asahi_submit, id: u64) -> Result {
         let dev = self.dev.data();
         let gpu = match dev.gpu.as_any().downcast_ref::<gpu::GpuManager::ver>() {
             Some(gpu) => gpu,
-            None => panic!("GpuManager mismatched with Renderer!"),
+            None => panic!("GpuManager mismatched with RenderQueue!"),
         };
         let notifier = &self.notifier;
 
@@ -301,17 +291,17 @@ impl Renderer for Renderer::ver {
 
         let mut cmdbuf_reader = unsafe {
             UserSlicePtr::new(
-                cmd.cmdbuf as usize as *mut _,
-                core::mem::size_of::<bindings::drm_asahi_cmdbuf>(),
+                cmd.cmd_buffer as usize as *mut _,
+                core::mem::size_of::<bindings::drm_asahi_cmd_render>(),
             )
             .reader()
         };
 
-        let mut cmdbuf: MaybeUninit<bindings::drm_asahi_cmdbuf> = MaybeUninit::uninit();
+        let mut cmdbuf: MaybeUninit<bindings::drm_asahi_cmd_render> = MaybeUninit::uninit();
         unsafe {
             cmdbuf_reader.read_raw(
                 cmdbuf.as_mut_ptr() as *mut u8,
-                core::mem::size_of::<bindings::drm_asahi_cmdbuf>(),
+                core::mem::size_of::<bindings::drm_asahi_cmd_render>(),
             )?;
         }
         let cmdbuf = unsafe { cmdbuf.assume_init() };
@@ -364,7 +354,7 @@ impl Renderer for Renderer::ver {
             );
         }
 
-        let vm_bind = gpu.bind_vm(vm)?;
+        let vm_bind = gpu.bind_vm(&self.vm)?;
 
         mod_dev_dbg!(
             self.dev,
@@ -567,7 +557,7 @@ impl Renderer for Renderer::ver {
                     scene: scene.clone(),
                     micro_seq: builder.build(&mut kalloc.private)?,
                     vm_bind: vm_bind.clone(),
-                    aux_fb: ualloc.lock().array_empty(0x8000)?,
+                    aux_fb: self.ualloc.lock().array_empty(0x8000)?,
                 })?)
             },
             |inner, ptr| {
@@ -1157,13 +1147,13 @@ impl Renderer for Renderer::ver {
 }
 
 #[versions(AGX)]
-impl Drop for Renderer::ver {
+impl Drop for RenderQueue::ver {
     fn drop(&mut self) {
         let dev = self.dev.data();
         if dev.gpu.invalidate_context(&self.gpu_context).is_err() {
             dev_err!(
                 self.dev,
-                "Renderer::drop: Failed to invalidate GPU context!\n"
+                "RenderQueue::drop: Failed to invalidate GPU context!\n"
             );
         }
     }

@@ -20,7 +20,7 @@ use crate::debug::*;
 use crate::driver::AsahiDevice;
 use crate::fw::channels::{DeviceControlMsg, FwCtlMsg, PipeType};
 use crate::{
-    alloc, buffer, channel, event, fw, gem, hw, initdata, mem, mmu, regs, render, workqueue,
+    alloc, buffer, channel, event, file, fw, gem, hw, initdata, mem, mmu, regs, render, workqueue,
 };
 
 const DEBUG_CLASS: DebugFlags = DebugFlags::Gpu;
@@ -132,11 +132,12 @@ pub(crate) trait GpuManager: Send + Sync {
     fn alloc(&self) -> Guard<'_, Mutex<KernelAllocators>>;
     fn new_vm(&self, file_id: u64) -> Result<mmu::Vm>;
     fn bind_vm(&self, vm: &mmu::Vm) -> Result<mmu::VmBind>;
-    fn new_renderer(
+    fn new_render_queue(
         &self,
+        vm: mmu::Vm,
         ualloc: Arc<Mutex<alloc::DefaultAllocator>>,
         ualloc_priv: Arc<Mutex<alloc::DefaultAllocator>>,
-    ) -> Result<Box<dyn render::Renderer>>;
+    ) -> Result<Box<dyn file::Queue>>;
     fn submit_batch(&self, batch: workqueue::WorkQueueBatch<'_>) -> Result;
     fn ids(&self) -> &SequenceIDs;
     fn kick_firmware(&self) -> Result;
@@ -663,15 +664,17 @@ impl GpuManager for GpuManager::ver {
         self.uat.bind(vm)
     }
 
-    fn new_renderer(
+    fn new_render_queue(
         &self,
+        vm: mmu::Vm,
         ualloc: Arc<Mutex<alloc::DefaultAllocator>>,
         ualloc_priv: Arc<Mutex<alloc::DefaultAllocator>>,
-    ) -> Result<Box<dyn render::Renderer>> {
+    ) -> Result<Box<dyn file::Queue>> {
         let mut kalloc = self.alloc();
         let id = self.ids.renderer.next();
-        Ok(Box::try_new(render::Renderer::ver::new(
+        Ok(Box::try_new(render::RenderQueue::ver::new(
             &self.dev,
+            vm,
             &mut *kalloc,
             ualloc,
             ualloc_priv,
