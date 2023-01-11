@@ -28,7 +28,7 @@ const DEBUG_CLASS: DebugFlags = DebugFlags::Gem;
 pub(crate) struct DriverObject {
     kernel: bool,
     flags: u32,
-    mappings: Mutex<Vec<(u64, crate::mmu::Mapping)>>,
+    mappings: Mutex<Vec<(u64, u64, crate::mmu::Mapping)>>,
 }
 
 pub(crate) type Object = shmem::Object<DriverObject>;
@@ -40,10 +40,20 @@ pub(crate) struct ObjectRef {
 }
 
 impl DriverObject {
-    fn drop_mappings(&self, vm_id: u64) {
+    fn drop_file_mappings(&self, file_id: u64) {
         let mut mappings = self.mappings.lock();
-        for (index, (mapped_id, _mapping)) in mappings.iter().enumerate() {
-            if *mapped_id == vm_id {
+        for (index, (mapped_fid, _mapped_vmid, _mapping)) in mappings.iter().enumerate() {
+            if *mapped_fid == file_id {
+                mappings.swap_remove(index);
+                return;
+            }
+        }
+    }
+
+    fn drop_vm_mappings(&self, vm_id: u64) {
+        let mut mappings = self.mappings.lock();
+        for (index, (_mapped_fid, mapped_vmid, _mapping)) in mappings.iter().enumerate() {
+            if *mapped_vmid == vm_id {
                 mappings.swap_remove(index);
                 return;
             }
@@ -65,8 +75,8 @@ impl ObjectRef {
 
     pub(crate) fn iova(&self, vm_id: u64) -> Option<usize> {
         let mappings = self.gem.mappings.lock();
-        for (mapped_id, mapping) in mappings.iter() {
-            if *mapped_id == vm_id {
+        for (_mapped_fid, mapped_vmid, mapping) in mappings.iter() {
+            if *mapped_vmid == vm_id {
                 return Some(mapping.iova());
             }
         }
@@ -81,8 +91,8 @@ impl ObjectRef {
     pub(crate) fn map_into(&mut self, vm: &crate::mmu::Vm) -> Result<usize> {
         let vm_id = vm.id();
         let mut mappings = self.gem.mappings.lock();
-        for (mapped_id, _mapping) in mappings.iter() {
-            if *mapped_id == vm_id {
+        for (_mapped_fid, mapped_vmid, _mapping) in mappings.iter() {
+            if *mapped_vmid == vm_id {
                 return Err(EBUSY);
             }
         }
@@ -91,7 +101,7 @@ impl ObjectRef {
         let new_mapping = vm.map(self.gem.size(), sgt)?;
 
         let iova = new_mapping.iova();
-        mappings.try_push((vm_id, new_mapping))?;
+        mappings.try_push((vm.file_id(), vm_id, new_mapping))?;
         Ok(iova)
     }
 
@@ -106,8 +116,8 @@ impl ObjectRef {
     ) -> Result<usize> {
         let vm_id = vm.id();
         let mut mappings = self.gem.mappings.lock();
-        for (mapped_id, _mapping) in mappings.iter() {
-            if *mapped_id == vm_id {
+        for (_mapped_fid, mapped_vmid, _mapping) in mappings.iter() {
+            if *mapped_vmid == vm_id {
                 return Err(EBUSY);
             }
         }
@@ -117,7 +127,7 @@ impl ObjectRef {
             vm.map_in_range(self.gem.size(), sgt, alignment, start, end, prot, guard)?;
 
         let iova = new_mapping.iova();
-        mappings.try_push((vm_id, new_mapping))?;
+        mappings.try_push((vm.file_id(), vm_id, new_mapping))?;
         Ok(iova)
     }
 
@@ -130,8 +140,8 @@ impl ObjectRef {
     ) -> Result {
         let vm_id = vm.id();
         let mut mappings = self.gem.mappings.lock();
-        for (mapped_id, _mapping) in mappings.iter() {
-            if *mapped_id == vm_id {
+        for (_mapped_fid, mapped_vmid, _mapping) in mappings.iter() {
+            if *mapped_vmid == vm_id {
                 return Err(EBUSY);
             }
         }
@@ -141,12 +151,16 @@ impl ObjectRef {
 
         let iova = new_mapping.iova();
         assert!(iova == addr as usize);
-        mappings.try_push((vm_id, new_mapping))?;
+        mappings.try_push((vm.file_id(), vm_id, new_mapping))?;
         Ok(())
     }
 
-    pub(crate) fn drop_mappings(&mut self, vm_id: u64) {
-        self.gem.drop_mappings(vm_id);
+    pub(crate) fn drop_file_mappings(&mut self, file_id: u64) {
+        self.gem.drop_file_mappings(file_id);
+    }
+
+    pub(crate) fn drop_vm_mappings(&mut self, vm_id: u64) {
+        self.gem.drop_vm_mappings(vm_id);
     }
 }
 
@@ -180,7 +194,7 @@ impl gem::BaseDriverObject<Object> for DriverObject {
 
     fn close(obj: &Object, file: &DrmFile) {
         mod_pr_debug!("DriverObject::close\n");
-        obj.drop_mappings(file.inner().vm_id());
+        obj.drop_file_mappings(file.inner().file_id());
     }
 }
 
