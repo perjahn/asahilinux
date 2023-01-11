@@ -115,6 +115,7 @@ impl WorkQueue {
         notifier_list: GpuWeakPointer<NotifierList>,
         pipe_type: PipeType,
         id: u64,
+        priority: u32,
     ) -> Result<Arc<WorkQueue>> {
         let mut info = box_in_place!(QueueInfo {
             state: alloc.shared.new_default::<RingState>()?,
@@ -140,7 +141,7 @@ impl WorkQueue {
                         gpu_rptr2: Default::default(),
                         gpu_rptr3: Default::default(),
                         event_id: AtomicI32::new(-1),
-                        priority: Default::default(),
+                        priority: *raw::PRIORITY.get(priority as usize).ok_or(EINVAL)?,
                         unk_4c: -1,
                         uuid: id as u32,
                         unk_54: -1,
