@@ -177,9 +177,13 @@ pub(crate) fn new_object(dev: &AsahiDevice, size: usize, flags: u32) -> Result<O
     gem.kernel = false;
     gem.flags = flags;
 
-    gem.set_wc(flags & bindings::ASAHI_BO_WRITEBACK == 0);
+    gem.set_wc(flags & bindings::ASAHI_GEM_WRITEBACK == 0);
 
     Ok(ObjectRef::new(gem.into_ref()))
+}
+
+pub(crate) fn lookup_handle(file: &DrmFile, handle: u32) -> Result<ObjectRef> {
+    Ok(ObjectRef::new(shmem::Object::lookup_handle(file, handle)?))
 }
 
 impl gem::BaseDriverObject<Object> for DriverObject {
