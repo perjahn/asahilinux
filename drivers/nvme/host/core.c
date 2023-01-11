@@ -2410,6 +2410,19 @@ int nvme_enable_ctrl(struct nvme_ctrl *ctrl)
 	if (ret)
 		return ret;
 
+	/*
+	 * If the controller is enabled but shut down, we need to disable it to
+	 * reset it and have it come up. If the controller has completed a
+	 * shutdown and is disabled, then we need to clear the shutdown request
+	 * and enable it in the same write to CC.
+	 * See NVMe Base Spec 2.0c Figure 47.
+	 */
+	if (ctrl->ctrl_config & NVME_CC_SHN_MASK && ctrl->ctrl_config & NVME_CC_ENABLE) {
+		ret = nvme_disable_ctrl(ctrl, false);
+		if (ret)
+			return ret;
+	}
+	ctrl->ctrl_config &= ~NVME_CC_SHN_MASK;
 	ctrl->ctrl_config |= NVME_CC_ENABLE;
 	ret = ctrl->ops->reg_write32(ctrl, NVME_REG_CC, ctrl->ctrl_config);
 	if (ret)
