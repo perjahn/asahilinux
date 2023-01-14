@@ -1,0 +1,93 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
+#![allow(missing_docs)]
+#![allow(dead_code)]
+
+//! GPU compute jobs
+
+use super::types::*;
+use super::{event, job, workqueue};
+use crate::{microseq, mmu};
+use kernel::sync::Arc;
+
+pub(crate) mod raw {
+    use super::*;
+
+    #[derive(Debug)]
+    #[repr(C)]
+    pub(crate) struct JobParameters1<'a> {
+        pub(crate) preempt_buf1: GpuPointer<'a, &'a [u8]>,
+        pub(crate) encoder: U64,
+        pub(crate) preempt_buf2: GpuPointer<'a, &'a [u8]>,
+        pub(crate) preempt_buf3: GpuPointer<'a, &'a [u8]>,
+        pub(crate) preempt_buf4: GpuPointer<'a, &'a [u8]>,
+        pub(crate) preempt_buf5: GpuPointer<'a, &'a [u8]>,
+        pub(crate) pipeline_base: U64,
+        pub(crate) unk_38: U64,
+        pub(crate) unk_40: u32,
+        pub(crate) unk_44: u32,
+        pub(crate) compute_layout_addr: U64,
+        pub(crate) unk_50: u32,
+        pub(crate) unk_54: u32,
+        pub(crate) unk_58: u32,
+        pub(crate) unk_5c: u32,
+        pub(crate) iogpu_unk_40: u32,
+    }
+
+    #[derive(Debug)]
+    #[repr(C)]
+    pub(crate) struct JobParameters2<'a> {
+        pub(crate) unk_0: Array<0x24, u8>,
+        pub(crate) preempt_buf1: GpuPointer<'a, &'a [u8]>,
+        pub(crate) encoder_end: U64,
+        pub(crate) unk_34: Array<0x2c, u8>,
+    }
+
+    #[versions(AGX)]
+    #[derive(Debug)]
+    #[repr(C)]
+    pub(crate) struct RunCompute<'a> {
+        pub(crate) tag: workqueue::CommandType,
+        pub(crate) unk_4: u32,
+        pub(crate) vm_slot: u32,
+        pub(crate) notifier: GpuPointer<'a, event::Notifier::ver>,
+        pub(crate) unk_pointee: Array<0x54, u8>,
+        pub(crate) job_params1: JobParameters1<'a>,
+        pub(crate) unk_b8: Array<0x11c, u8>,
+        pub(crate) microsequence: GpuPointer<'a, &'a [u8]>,
+        pub(crate) microsequence_size: u32,
+        pub(crate) job_params2: JobParameters2<'a>,
+        pub(crate) encoder_params: job::EncoderParams<'a>,
+        pub(crate) meta: job::JobMeta,
+        pub(crate) ts1: U64,
+        pub(crate) ts2: U64,
+        pub(crate) ts3: U64,
+        pub(crate) unk_2c0: u32,
+        pub(crate) unk_2c4: u32,
+        pub(crate) unk_2c8: u32,
+        pub(crate) unk_2cc: u32,
+        pub(crate) client_sequence: u8,
+        pub(crate) unk_2d1: u8,
+        pub(crate) unk_2d2: u16,
+        pub(crate) unk_2d4: u32,
+        pub(crate) unk_2d8: u8,
+        pub(crate) pad_2d9: Array<0x7, u8>,
+    }
+}
+
+#[versions(AGX)]
+#[derive(Debug)]
+pub(crate) struct RunCompute {
+    pub(crate) notifier: Arc<GpuObject<event::Notifier::ver>>,
+    pub(crate) preempt_buf: GpuArray<u8>,
+    pub(crate) seq_buf: GpuArray<u64>,
+    pub(crate) micro_seq: microseq::MicroSequence,
+    pub(crate) vm_bind: mmu::VmBind,
+}
+
+#[versions(AGX)]
+impl GpuStruct for RunCompute::ver {
+    type Raw<'a> = raw::RunCompute::ver<'a>;
+}
+
+#[versions(AGX)]
+impl workqueue::Command for RunCompute::ver {}

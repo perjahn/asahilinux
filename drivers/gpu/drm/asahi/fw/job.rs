@@ -18,13 +18,6 @@ pub(crate) struct JobMeta {
     pub(crate) unk_24: u32,
     pub(crate) uuid: u32,
     pub(crate) prev_stamp_value: u32,
-    pub(crate) unk_30: u32,
-    pub(crate) unk_buf_0: U64,
-    pub(crate) unk_buf_8: U64,
-    pub(crate) unk_buf_10: U64,
-    pub(crate) ts1: U64,
-    pub(crate) ts2: U64,
-    pub(crate) ts3: U64,
 }
 
 #[derive(Debug)]
@@ -35,7 +28,7 @@ pub(crate) struct EncoderParams<'a> {
     pub(crate) unk_10: u32,
     pub(crate) encoder_id: u32,
     pub(crate) unk_18: u32,
-    pub(crate) unk_1c: u32,
+    pub(crate) iogpu_compute_unk44: u32,
     pub(crate) seq_buffer: GpuPointer<'a, &'a [u64]>,
     pub(crate) unk_28: U64,
 }
