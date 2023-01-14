@@ -20,7 +20,8 @@ use crate::debug::*;
 use crate::driver::AsahiDevice;
 use crate::fw::channels::{DeviceControlMsg, FwCtlMsg, PipeType};
 use crate::{
-    alloc, buffer, channel, event, file, fw, gem, hw, initdata, mem, mmu, regs, render, workqueue,
+    alloc, buffer, channel, compute, event, file, fw, gem, hw, initdata, mem, mmu, regs, render,
+    workqueue,
 };
 
 const DEBUG_CLASS: DebugFlags = DebugFlags::Gpu;
@@ -102,7 +103,7 @@ pub(crate) struct SequenceIDs {
     pub(crate) vm: ID,
     pub(crate) buf: ID,
     pub(crate) submission: ID,
-    pub(crate) renderer: ID,
+    pub(crate) queue: ID,
 }
 
 #[versions(AGX)]
@@ -137,6 +138,12 @@ pub(crate) trait GpuManager: Send + Sync {
         vm: mmu::Vm,
         ualloc: Arc<Mutex<alloc::DefaultAllocator>>,
         ualloc_priv: Arc<Mutex<alloc::DefaultAllocator>>,
+        priority: u32,
+    ) -> Result<Box<dyn file::Queue>>;
+    fn new_compute_queue(
+        &self,
+        vm: mmu::Vm,
+        ualloc: Arc<Mutex<alloc::DefaultAllocator>>,
         priority: u32,
     ) -> Result<Box<dyn file::Queue>>;
     fn submit_batch(&self, batch: workqueue::WorkQueueBatch<'_>) -> Result;
@@ -673,7 +680,7 @@ impl GpuManager for GpuManager::ver {
         priority: u32,
     ) -> Result<Box<dyn file::Queue>> {
         let mut kalloc = self.alloc();
-        let id = self.ids.renderer.next();
+        let id = self.ids.queue.next();
         Ok(Box::try_new(render::RenderQueue::ver::new(
             &self.dev,
             vm,
@@ -682,6 +689,25 @@ impl GpuManager for GpuManager::ver {
             ualloc_priv,
             self.event_manager.clone(),
             &self.buffer_mgr,
+            id,
+            priority,
+        )?)?)
+    }
+
+    fn new_compute_queue(
+        &self,
+        vm: mmu::Vm,
+        ualloc: Arc<Mutex<alloc::DefaultAllocator>>,
+        priority: u32,
+    ) -> Result<Box<dyn file::Queue>> {
+        let mut kalloc = self.alloc();
+        let id = self.ids.queue.next();
+        Ok(Box::try_new(compute::ComputeQueue::ver::new(
+            &self.dev,
+            vm,
+            &mut *kalloc,
+            ualloc,
+            self.event_manager.clone(),
             id,
             priority,
         )?)?)
