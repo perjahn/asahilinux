@@ -5,6 +5,7 @@
 
 pub(crate) mod buffer;
 pub(crate) mod channels;
+pub(crate) mod compute;
 pub(crate) mod event;
 pub(crate) mod fragment;
 pub(crate) mod initdata;

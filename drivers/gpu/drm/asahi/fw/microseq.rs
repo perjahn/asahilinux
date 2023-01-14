@@ -5,7 +5,7 @@
 //! GPU events & stamps
 
 use super::types::*;
-use super::{buffer, fragment, initdata, vertex, workqueue};
+use super::{buffer, compute, fragment, initdata, vertex, workqueue};
 
 pub(crate) trait Operation {}
 
@@ -275,3 +275,59 @@ pub(crate) struct FinalizeFragment {
 
 #[versions(AGX)]
 impl Operation for FinalizeFragment::ver {}
+
+#[derive(Debug)]
+#[repr(C)]
+pub(crate) struct StartCompute<'a> {
+    pub(crate) header: op::StartCompute,
+    pub(crate) unk_pointer: GpuWeakPointer<Array<0x54, u8>>,
+    pub(crate) job_params1: GpuWeakPointer<compute::raw::JobParameters1<'a>>,
+    pub(crate) stats: GpuWeakPointer<initdata::GpuStatsComp>,
+    pub(crate) work_queue: GpuWeakPointer<workqueue::QueueInfo>,
+    pub(crate) vm_slot: u32,
+    pub(crate) unk_28: u32,
+    pub(crate) counter1: u32,
+    pub(crate) counter2: u32,
+    pub(crate) unk_34: u32,
+    pub(crate) unk_38: u32,
+    pub(crate) job_params2: GpuWeakPointer<compute::raw::JobParameters2<'a>>,
+    pub(crate) unk_44: u32,
+    pub(crate) uuid: u32,
+    pub(crate) padding: Array<0x108, u8>,
+}
+
+impl<'a> Operation for StartCompute<'a> {}
+
+#[versions(AGX)]
+#[derive(Debug)]
+#[repr(C)]
+pub(crate) struct FinalizeCompute<'a> {
+    pub(crate) header: op::FinalizeCompute,
+    pub(crate) stats: GpuWeakPointer<initdata::GpuStatsComp>,
+    pub(crate) work_queue: GpuWeakPointer<workqueue::QueueInfo>,
+    pub(crate) vm_slot: u32,
+    pub(crate) unk_18: u32,
+    pub(crate) job_params2: GpuWeakPointer<compute::raw::JobParameters2<'a>>,
+    pub(crate) unk_24: u32,
+    pub(crate) uuid: u32,
+    pub(crate) fw_stamp: GpuWeakPointer<FwStamp>,
+    pub(crate) stamp_value: EventValue,
+    pub(crate) unk_38: u32,
+    pub(crate) unk_3c: u32,
+    pub(crate) unk_40: u32,
+    pub(crate) unk_44: u32,
+    pub(crate) unk_48: u32,
+    pub(crate) unk_4c: u32,
+    pub(crate) unk_50: u32,
+    pub(crate) unk_54: u32,
+    pub(crate) unk_58: u32,
+
+    #[ver(G >= G14)]
+    pub(crate) unk_5c_g14: U64,
+
+    pub(crate) restart_branch_offset: i32,
+    pub(crate) unk_60: u32,
+}
+
+#[versions(AGX)]
+impl<'a> Operation for FinalizeCompute::ver<'a> {}
