@@ -346,6 +346,10 @@ impl File {
                 .data()
                 .gpu
                 .new_render_queue(vm, ualloc, ualloc_priv, data.priority)?,
+            bindings::drm_asahi_queue_type_DRM_ASAHI_QUEUE_COMPUTE => device
+                .data()
+                .gpu
+                .new_compute_queue(vm, ualloc, data.priority)?,
             _ => return Err(EINVAL),
         };
 
