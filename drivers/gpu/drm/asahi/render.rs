@@ -4,7 +4,7 @@
 #![allow(dead_code)]
 #![allow(clippy::unusual_byte_groupings)]
 
-//! Asahi File state
+//! Asahi Render Queue
 
 use crate::alloc::Allocator;
 use crate::debug::*;
