@@ -273,6 +273,24 @@ struct drm_asahi_cmd_render {
 	__u32 attachment_count;
 };
 
+struct drm_asahi_cmd_compute {
+	__u64 flags;
+
+	__u64 encoder_ptr;
+	__u64 encoder_end;
+
+	__u64 buffer_descriptor;
+
+	__u32 buffer_descriptor_size; // ?
+	__u32 ctx_switch_prog;
+
+	__u32 encoder_id;
+	__u32 cmd_id;
+
+	__u32 iogpu_unk_40;
+	__u32 iogpu_unk_44;
+};
+
 /* Note: this is an enum so that it can be resolved by Rust bindgen. */
 enum {
    DRM_IOCTL_ASAHI_GET_PARAM        = DRM_IOWR(DRM_COMMAND_BASE + DRM_ASAHI_GET_PARAM, struct drm_asahi_get_param),
