@@ -7,6 +7,7 @@
 mod alloc;
 mod buffer;
 mod channel;
+mod compute;
 mod debug;
 mod driver;
 mod event;
