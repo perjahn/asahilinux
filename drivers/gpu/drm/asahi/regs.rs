@@ -93,10 +93,12 @@ pub(crate) enum FaultReason {
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub(crate) struct FaultInfo {
     pub(crate) address: u64,
-    pub(crate) write: bool,
+    pub(crate) sideband: u8,
     pub(crate) vm_slot: u32,
     pub(crate) unit: FaultUnit,
-    pub(crate) unk_8: bool,
+    pub(crate) level: u8,
+    pub(crate) unk_5: u8,
+    pub(crate) read: bool,
     pub(crate) reason: FaultReason,
 }
 
@@ -335,11 +337,13 @@ impl Resources {
         };
 
         Some(FaultInfo {
-            address: fault_info >> 24,
-            write: fault_info & (1 << 23) != 0,
+            address: (fault_info >> 30) << 6,
+            sideband: ((fault_info >> 23) & 0x7f) as u8,
             vm_slot: ((fault_info >> 17) & 0x3f) as u32,
             unit,
-            unk_8: fault_info & (1 << 8) != 0,
+            level: ((fault_info >> 7) & 3) as u8,
+            unk_5: ((fault_info >> 5) & 3) as u8,
+            read: (fault_info & (1 << 4)) != 0,
             reason,
         })
     }
