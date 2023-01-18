@@ -47,6 +47,15 @@ pub enum InsertMode {
     Evict = bindings::drm_mm_insert_mode_DRM_MM_INSERT_EVICT,
 }
 
+pub struct InnerRef<A: AllocInner<T>, T>(Arc<Mutex<MmInner<A, T>>>);
+
+impl<A: AllocInner<T>, T> InnerRef<A, T> {
+    pub fn with<RetVal>(&self, cb: impl FnOnce(&mut A) -> RetVal) -> RetVal {
+        let mut l = self.0.lock();
+        cb(&mut l.1)
+    }
+}
+
 impl<A: AllocInner<T>, T> NodeData<A, T> {
     pub fn color(&self) -> usize {
         self.node.color as usize
@@ -60,6 +69,9 @@ impl<A: AllocInner<T>, T> NodeData<A, T> {
     pub fn with_inner<RetVal>(&self, cb: impl FnOnce(&mut A) -> RetVal) -> RetVal {
         let mut l = self.mm.lock();
         cb(&mut l.1)
+    }
+    pub fn inner_ref(&self) -> InnerRef<A, T> {
+        InnerRef(self.mm.clone())
     }
 }
 
