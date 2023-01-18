@@ -295,7 +295,7 @@ impl file::Queue for ComputeQueue::ver {
                             encoder_end: U64(cmdbuf.encoder_end),
                             unk_34: Default::default(),
                         },
-                        encoder_params: fw::job::EncoderParams {
+                        encoder_params: fw::job::raw::EncoderParams {
                             unk_8: 0x0,  // fixed
                             unk_c: 0x0,  // fixed
                             unk_10: 0x0, // fixed
@@ -305,7 +305,7 @@ impl file::Queue for ComputeQueue::ver {
                             seq_buffer: inner.seq_buf.gpu_pointer(),
                             unk_28: U64(0x0), // fixed
                         },
-                        meta: fw::job::JobMeta {
+                        meta: fw::job::raw::JobMeta {
                             unk_4: 0,
                             stamp: batches.event().stamp_pointer(),
                             fw_stamp: batches.event().fw_stamp_pointer(),

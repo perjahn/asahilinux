@@ -6,29 +6,34 @@
 
 use super::types::*;
 
-#[derive(Debug, Clone, Copy)]
-#[repr(C)]
-pub(crate) struct JobMeta {
-    pub(crate) unk_4: u32,
-    pub(crate) stamp: GpuWeakPointer<Stamp>,
-    pub(crate) fw_stamp: GpuWeakPointer<FwStamp>,
-    pub(crate) stamp_value: EventValue,
-    pub(crate) stamp_slot: u32,
-    pub(crate) evctl_index: u32,
-    pub(crate) unk_24: u32,
-    pub(crate) uuid: u32,
-    pub(crate) prev_stamp_value: u32,
-}
+pub(crate) mod raw {
+    use super::*;
 
-#[derive(Debug)]
-#[repr(C)]
-pub(crate) struct EncoderParams<'a> {
-    pub(crate) unk_8: u32,
-    pub(crate) unk_c: u32,
-    pub(crate) unk_10: u32,
-    pub(crate) encoder_id: u32,
-    pub(crate) unk_18: u32,
-    pub(crate) iogpu_compute_unk44: u32,
-    pub(crate) seq_buffer: GpuPointer<'a, &'a [u64]>,
-    pub(crate) unk_28: U64,
+    #[derive(Debug, Clone, Copy)]
+    #[repr(C)]
+    pub(crate) struct JobMeta {
+        pub(crate) unk_4: u32,
+        pub(crate) stamp: GpuWeakPointer<Stamp>,
+        pub(crate) fw_stamp: GpuWeakPointer<FwStamp>,
+        pub(crate) stamp_value: EventValue,
+        pub(crate) stamp_slot: u32,
+        pub(crate) evctl_index: u32,
+        pub(crate) unk_24: u32,
+        pub(crate) uuid: u32,
+        pub(crate) prev_stamp_value: u32,
+    }
+
+    #[derive(Debug)]
+    #[repr(C)]
+    pub(crate) struct EncoderParams<'a> {
+        pub(crate) unk_8: u32,
+        pub(crate) unk_c: u32,
+        pub(crate) unk_10: u32,
+        pub(crate) encoder_id: u32,
+        pub(crate) unk_18: u32,
+        pub(crate) iogpu_compute_unk44: u32,
+        pub(crate) seq_buffer: GpuPointer<'a, &'a [u64]>,
+        pub(crate) unk_28: U64,
+    }
+
 }
