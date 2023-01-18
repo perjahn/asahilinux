@@ -426,6 +426,8 @@ impl file::Queue for RenderQueue::ver {
 
         batches_frag.add(Box::try_new(barrier)?)?;
 
+        let timestamps = Arc::try_new(kalloc.shared.new_default::<fw::job::JobTimestamps>()?)?;
+
         // Seems to be a "go faster" bit? Not sure what it does exactly...
         let unk0 = debug_enabled(debug::DebugFlags::Debug0);
 
@@ -515,8 +517,34 @@ impl file::Queue for RenderQueue::ver {
                     notifier_buf: inner_weak_ptr!(&notifier.weak_pointer(), state.unk_buf),
                 })?;
 
+                builder.add(microseq::Timestamp::ver {
+                    header: microseq::op::Timestamp::new(true),
+                    cur_ts: inner_weak_ptr!(ptr, cur_ts),
+                    start_ts: inner_weak_ptr!(ptr, start_ts),
+                    update_ts: inner_weak_ptr!(ptr, start_ts),
+                    work_queue: self.wq_frag.info_pointer(),
+                    unk_24: U64(0),
+                    #[ver(V >= V13_0B4)]
+                    ts_flag: inner_weak_ptr!(ptr, ts_flag),
+                    uuid: uuid_3d,
+                    unk_30_padding: 0,
+                })?;
+
                 builder.add(microseq::WaitForIdle {
                     header: microseq::op::WaitForIdle::new(microseq::Pipe::Fragment),
+                })?;
+
+                builder.add(microseq::Timestamp::ver {
+                    header: microseq::op::Timestamp::new(true),
+                    cur_ts: inner_weak_ptr!(ptr, cur_ts),
+                    start_ts: inner_weak_ptr!(ptr, start_ts),
+                    update_ts: inner_weak_ptr!(ptr, end_ts),
+                    work_queue: self.wq_frag.info_pointer(),
+                    unk_24: U64(0),
+                    #[ver(V >= V13_0B4)]
+                    ts_flag: inner_weak_ptr!(ptr, ts_flag),
+                    uuid: uuid_3d,
+                    unk_30_padding: 0,
                 })?;
 
                 let off = builder.offset_to(start_frag);
@@ -561,6 +589,7 @@ impl file::Queue for RenderQueue::ver {
                     micro_seq: builder.build(&mut kalloc.private)?,
                     vm_bind: vm_bind.clone(),
                     aux_fb: self.ualloc.lock().array_empty(0x8000)?,
+                    timestamps: timestamps.clone(),
                 })?)
             },
             |inner, ptr| {
@@ -773,8 +802,8 @@ impl file::Queue for RenderQueue::ver {
                         unk_buf_8: U64(0),
                         unk_buf_10: U64(1),
                         cur_ts: U64(0),
-                        start_ts: None,
-                        end_ts: None,
+                        start_ts: Some(inner_ptr!(inner.timestamps.gpu_pointer(), start)),
+                        end_ts: Some(inner_ptr!(inner.timestamps.gpu_pointer(), end)),
                         unk_914: 0,
                         unk_918: U64(0),
                         unk_920: 0,
@@ -867,8 +896,34 @@ impl file::Queue for RenderQueue::ver {
                     unk_188: 0x0,
                 })?;
 
+                builder.add(microseq::Timestamp::ver {
+                    header: microseq::op::Timestamp::new(true),
+                    cur_ts: inner_weak_ptr!(ptr, cur_ts),
+                    start_ts: inner_weak_ptr!(ptr, start_ts),
+                    update_ts: inner_weak_ptr!(ptr, start_ts),
+                    work_queue: self.wq_vtx.info_pointer(),
+                    unk_24: U64(0),
+                    #[ver(V >= V13_0B4)]
+                    ts_flag: inner_weak_ptr!(ptr, ts_flag),
+                    uuid: uuid_ta,
+                    unk_30_padding: 0,
+                })?;
+
                 builder.add(microseq::WaitForIdle {
                     header: microseq::op::WaitForIdle::new(microseq::Pipe::Vertex),
+                })?;
+
+                builder.add(microseq::Timestamp::ver {
+                    header: microseq::op::Timestamp::new(true),
+                    cur_ts: inner_weak_ptr!(ptr, cur_ts),
+                    start_ts: inner_weak_ptr!(ptr, start_ts),
+                    update_ts: inner_weak_ptr!(ptr, end_ts),
+                    work_queue: self.wq_vtx.info_pointer(),
+                    unk_24: U64(0),
+                    #[ver(V >= V13_0B4)]
+                    ts_flag: inner_weak_ptr!(ptr, ts_flag),
+                    uuid: uuid_ta,
+                    unk_30_padding: 0,
                 })?;
 
                 let off = builder.offset_to(start_vtx);
@@ -909,6 +964,7 @@ impl file::Queue for RenderQueue::ver {
                     scene: scene.clone(),
                     micro_seq: builder.build(&mut kalloc.private)?,
                     vm_bind: vm_bind.clone(),
+                    timestamps: timestamps,
                 })?)
             },
             |inner, ptr| {
@@ -1051,7 +1107,7 @@ impl file::Queue for RenderQueue::ver {
                         unk_buf_8: U64(0),
                         unk_buf_10: U64(0),
                         cur_ts: U64(0),
-                        start_ts: None,
+                        start_ts: Some(inner_ptr!(inner.timestamps.gpu_pointer(), start)),
                         end_ts: None,
                         unk_5c4: 0,
                         unk_5c8: 0,
