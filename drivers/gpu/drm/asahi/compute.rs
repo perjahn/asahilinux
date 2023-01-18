@@ -183,6 +183,8 @@ impl file::Queue for ComputeQueue::ver {
             next_stamp
         );
 
+        let timestamps = kalloc.shared.new_default::<fw::job::JobTimestamps>()?;
+
         let uuid = cmdbuf.cmd_id;
 
         let unk0 = debug_enabled(debug::DebugFlags::Debug0);
@@ -215,8 +217,34 @@ impl file::Queue for ComputeQueue::ver {
                     padding: Default::default(),
                 })?;
 
+                builder.add(microseq::Timestamp::ver {
+                    header: microseq::op::Timestamp::new(true),
+                    cur_ts: inner_weak_ptr!(ptr, cur_ts),
+                    start_ts: inner_weak_ptr!(ptr, start_ts),
+                    update_ts: inner_weak_ptr!(ptr, start_ts),
+                    work_queue: self.wq.info_pointer(),
+                    unk_24: U64(0),
+                    #[ver(V >= V13_0B4)]
+                    ts_flag: inner_weak_ptr!(ptr, ts_flag),
+                    uuid,
+                    unk_30_padding: 0,
+                })?;
+
                 builder.add(microseq::WaitForIdle {
                     header: microseq::op::WaitForIdle::new(microseq::Pipe::Compute),
+                })?;
+
+                builder.add(microseq::Timestamp::ver {
+                    header: microseq::op::Timestamp::new(false),
+                    cur_ts: inner_weak_ptr!(ptr, cur_ts),
+                    start_ts: inner_weak_ptr!(ptr, start_ts),
+                    update_ts: inner_weak_ptr!(ptr, end_ts),
+                    work_queue: self.wq.info_pointer(),
+                    unk_24: U64(0),
+                    #[ver(V >= V13_0B4)]
+                    ts_flag: inner_weak_ptr!(ptr, ts_flag),
+                    uuid,
+                    unk_30_padding: 0,
                 })?;
 
                 let off = builder.offset_to(start_comp);
@@ -256,6 +284,7 @@ impl file::Queue for ComputeQueue::ver {
                     seq_buf: seq_buf,
                     micro_seq: builder.build(&mut kalloc.private)?,
                     vm_bind: vm_bind.clone(),
+                    timestamps: timestamps,
                 })?)
             },
             |inner, ptr| {
@@ -317,8 +346,8 @@ impl file::Queue for ComputeQueue::ver {
                             prev_stamp_value: 0,
                         },
                         cur_ts: U64(0),
-                        start_ts: None,
-                        end_ts: None,
+                        start_ts: Some(inner_ptr!(inner.timestamps.gpu_pointer(), start)),
+                        end_ts: Some(inner_ptr!(inner.timestamps.gpu_pointer(), end)),
                         unk_2c0: 0,
                         unk_2c4: 0,
                         unk_2c8: 0,
