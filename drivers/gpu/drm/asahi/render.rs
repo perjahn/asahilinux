@@ -528,6 +528,7 @@ impl file::Queue for RenderQueue::ver {
                     notifier_buf: inner_weak_ptr!(notifier.weak_pointer(), state.unk_buf),
                 })?;
 
+                /*
                 builder.add(microseq::Timestamp::ver {
                     header: microseq::op::Timestamp::new(true),
                     cur_ts: inner_weak_ptr!(ptr, cur_ts),
@@ -540,11 +541,13 @@ impl file::Queue for RenderQueue::ver {
                     uuid: uuid_3d,
                     unk_30_padding: 0,
                 })?;
+                */
 
                 builder.add(microseq::WaitForIdle {
                     header: microseq::op::WaitForIdle::new(microseq::Pipe::Fragment),
                 })?;
 
+                /*
                 builder.add(microseq::Timestamp::ver {
                     header: microseq::op::Timestamp::new(true),
                     cur_ts: inner_weak_ptr!(ptr, cur_ts),
@@ -557,6 +560,7 @@ impl file::Queue for RenderQueue::ver {
                     uuid: uuid_3d,
                     unk_30_padding: 0,
                 })?;
+                */
 
                 let off = builder.offset_to(start_frag);
                 builder.add(microseq::FinalizeFragment::ver {
@@ -901,6 +905,7 @@ impl file::Queue for RenderQueue::ver {
                     unk_178: 0x0, // padding?
                 })?;
 
+                /*
                 builder.add(microseq::Timestamp::ver {
                     header: microseq::op::Timestamp::new(true),
                     cur_ts: inner_weak_ptr!(ptr, cur_ts),
@@ -913,11 +918,13 @@ impl file::Queue for RenderQueue::ver {
                     uuid: uuid_ta,
                     unk_30_padding: 0,
                 })?;
+                */
 
                 builder.add(microseq::WaitForIdle {
                     header: microseq::op::WaitForIdle::new(microseq::Pipe::Vertex),
                 })?;
 
+                /*
                 builder.add(microseq::Timestamp::ver {
                     header: microseq::op::Timestamp::new(true),
                     cur_ts: inner_weak_ptr!(ptr, cur_ts),
@@ -930,6 +937,7 @@ impl file::Queue for RenderQueue::ver {
                     uuid: uuid_ta,
                     unk_30_padding: 0,
                 })?;
+                */
 
                 let off = builder.offset_to(start_vtx);
                 builder.add(microseq::FinalizeVertex::ver {
