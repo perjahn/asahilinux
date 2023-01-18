@@ -59,8 +59,8 @@ pub(crate) mod raw {
         pub(crate) encoder_params: job::raw::EncoderParams<'a>,
         pub(crate) meta: job::raw::JobMeta,
         pub(crate) cur_ts: U64,
-        pub(crate) start_ts: Option<GpuPointer<'a, U64>>,
-        pub(crate) end_ts: Option<GpuPointer<'a, U64>>,
+        pub(crate) start_ts: Option<GpuPointer<'a, AtomicU64>>,
+        pub(crate) end_ts: Option<GpuPointer<'a, AtomicU64>>,
         pub(crate) unk_2c0: u32,
         pub(crate) unk_2c4: u32,
         pub(crate) unk_2c8: u32,
@@ -82,7 +82,7 @@ pub(crate) struct RunCompute {
     pub(crate) seq_buf: GpuArray<u64>,
     pub(crate) micro_seq: microseq::MicroSequence,
     pub(crate) vm_bind: mmu::VmBind,
-    pub(crate) timestamps: GpuObject<job::JobTimestamps>,
+    pub(crate) timestamps: Arc<GpuObject<job::JobTimestamps>>,
 }
 
 #[versions(AGX)]

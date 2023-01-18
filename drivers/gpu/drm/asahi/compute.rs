@@ -15,6 +15,7 @@ use crate::util::*;
 use crate::{alloc, channel, driver, event, file, fw, gem, gpu, microseq, mmu, workqueue};
 use crate::{box_in_place, inner_ptr, inner_weak_ptr, place};
 use core::mem::MaybeUninit;
+use core::sync::atomic::Ordering;
 use kernel::bindings;
 use kernel::drm::gem::BaseObject;
 use kernel::io_buffer::IoBufferReader;
@@ -183,7 +184,7 @@ impl file::Queue for ComputeQueue::ver {
             next_stamp
         );
 
-        let timestamps = kalloc.shared.new_default::<fw::job::JobTimestamps>()?;
+        let timestamps = Arc::try_new(kalloc.shared.new_default::<fw::job::JobTimestamps>()?)?;
 
         let uuid = cmdbuf.cmd_id;
 
@@ -284,7 +285,7 @@ impl file::Queue for ComputeQueue::ver {
                     seq_buf: seq_buf,
                     micro_seq: builder.build(&mut kalloc.private)?,
                     vm_bind: vm_bind.clone(),
-                    timestamps: timestamps,
+                    timestamps: timestamps.clone(),
                 })?)
             },
             |inner, ptr| {
@@ -397,6 +398,22 @@ impl file::Queue for ComputeQueue::ver {
                 ret = Err(err.into());
             }
         }
+
+        let (ts_start, ts_end) = timestamps.with(|raw, _inner| {
+            (
+                raw.start.load(Ordering::Relaxed),
+                raw.end.load(Ordering::Relaxed),
+            )
+        });
+
+        mod_dev_dbg!(
+            self.dev,
+            "[Submission {}] Timestamps: {} {} (delta: {})\n",
+            id,
+            ts_start,
+            ts_end,
+            ts_end.wrapping_sub(ts_start)
+        );
 
         if debug_enabled(debug::DebugFlags::WaitForPowerOff) {
             mod_dev_dbg!(self.dev, "[Submission {}] Waiting for GPU power-off\n", id);

@@ -110,8 +110,8 @@ impl Operation for RetireStamp {}
 pub(crate) struct Timestamp<'a> {
     pub(crate) header: op::Timestamp,
     pub(crate) cur_ts: GpuWeakPointer<U64>,
-    pub(crate) start_ts: GpuWeakPointer<Option<GpuPointer<'a, U64>>>,
-    pub(crate) update_ts: GpuWeakPointer<Option<GpuPointer<'a, U64>>>,
+    pub(crate) start_ts: GpuWeakPointer<Option<GpuPointer<'a, AtomicU64>>>,
+    pub(crate) update_ts: GpuWeakPointer<Option<GpuPointer<'a, AtomicU64>>>,
     pub(crate) work_queue: GpuWeakPointer<workqueue::QueueInfo>,
     pub(crate) unk_24: U64,
 
