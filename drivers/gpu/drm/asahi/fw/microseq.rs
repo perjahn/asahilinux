@@ -107,6 +107,27 @@ impl Operation for RetireStamp {}
 #[versions(AGX)]
 #[derive(Debug)]
 #[repr(C)]
+pub(crate) struct Timestamp<'a> {
+    pub(crate) header: op::Timestamp,
+    pub(crate) cur_ts: GpuWeakPointer<U64>,
+    pub(crate) start_ts: GpuWeakPointer<Option<GpuPointer<'a, U64>>>,
+    pub(crate) update_ts: GpuWeakPointer<Option<GpuPointer<'a, U64>>>,
+    pub(crate) work_queue: GpuWeakPointer<workqueue::QueueInfo>,
+    pub(crate) unk_24: U64,
+
+    #[ver(V >= V13_0B4)]
+    pub(crate) ts_flag: GpuWeakPointer<u8>,
+
+    pub(crate) uuid: u32,
+    pub(crate) unk_30_padding: u32,
+}
+
+#[versions(AGX)]
+impl<'a> Operation for Timestamp::ver<'a> {}
+
+#[versions(AGX)]
+#[derive(Debug)]
+#[repr(C)]
 pub(crate) struct StartVertex<'a> {
     pub(crate) header: op::StartVertex,
     pub(crate) tiling_params: GpuWeakPointer<vertex::raw::TilingParameters>,
