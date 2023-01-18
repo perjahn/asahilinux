@@ -1087,6 +1087,7 @@ impl file::Queue for RenderQueue::ver {
         batches_vtx.add(Box::try_new(vtx)?)?;
         let batch_vtx = batches_vtx.commit()?;
 
+        let _op_guard = gpu.start_op()?;
         mod_dev_dbg!(self.dev, "[Submission {}] Submit frag!\n", id);
         gpu.submit_batch(batches_frag)?;
         mod_dev_dbg!(self.dev, "[Submission {}] Submit vert!\n", id);

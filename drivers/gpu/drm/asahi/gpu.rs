@@ -97,6 +97,14 @@ impl Default for ID {
     }
 }
 
+pub(crate) struct OpGuard<'a>(&'a dyn GpuManagerPriv);
+
+impl<'a> Drop for OpGuard<'a> {
+    fn drop(&mut self) {
+        self.0.end_op();
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct SequenceIDs {
     pub(crate) file: ID,
@@ -160,6 +168,11 @@ pub(crate) trait GpuManager: Send + Sync {
     fn fwctl(&self, msg: FwCtlMsg) -> Result;
     fn get_cfg(&self) -> &'static hw::HwConfig;
     fn get_dyncfg(&self) -> &hw::DynConfig;
+    fn start_op(&self) -> Result<OpGuard<'_>>;
+}
+
+trait GpuManagerPriv {
+    fn end_op(&self);
 }
 
 #[versions(AGX)]
@@ -644,6 +657,9 @@ impl GpuManager for GpuManager::ver {
         rtk.start_endpoint(EP_DOORBELL)?;
         rtk.send_message(EP_FIRMWARE, MSG_INIT | (initdata & INIT_DATA_MASK))?;
         rtk.send_message(EP_DOORBELL, MSG_TX_DOORBELL | DOORBELL_DEVCTRL)?;
+        core::mem::drop(guard);
+
+        self.kick_firmware()?;
         Ok(())
     }
 
@@ -889,8 +905,32 @@ impl GpuManager for GpuManager::ver {
     fn get_cfg(&self) -> &'static hw::HwConfig {
         self.cfg
     }
+
     fn get_dyncfg(&self) -> &hw::DynConfig {
         &*self.dyncfg
+    }
+
+    fn start_op(&self) -> Result<OpGuard<'_>> {
+        let val = self
+            .initdata
+            .globals
+            .with(|raw, _inner| raw.pending_submissions.fetch_add(1, Ordering::Acquire));
+
+        mod_dev_dbg!(self.dev, "OP start (pending: {})\n", val + 1);
+        self.kick_firmware()?;
+        Ok(OpGuard(self))
+    }
+}
+
+#[versions(AGX)]
+impl GpuManagerPriv for GpuManager::ver {
+    fn end_op(&self) {
+        let val = self
+            .initdata
+            .globals
+            .with(|raw, _inner| raw.pending_submissions.fetch_sub(1, Ordering::Release));
+
+        mod_dev_dbg!(self.dev, "OP end (pending: {})\n", val - 1);
     }
 }
 

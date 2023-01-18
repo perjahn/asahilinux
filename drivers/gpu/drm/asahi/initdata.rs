@@ -517,6 +517,7 @@ impl<'a> InitDataBuilder::ver<'a> {
                             ..Default::default()
                         },
                         unk_8900: 1,
+                        pending_submissions: AtomicU32::new(0),
                         max_power: pwr.max_power_mw,
                         max_pstate_scaled: max_ps_scaled,
                         max_pstate_scaled_2: max_ps_scaled,
