@@ -35,6 +35,7 @@ pub(crate) struct ComputeQueue {
     notifier_list: GpuObject<fw::event::NotifierList>,
     notifier: Arc<GpuObject<fw::event::Notifier::ver>>,
     id: u64,
+    command_count: AtomicU32,
 }
 
 #[versions(AGX)]
@@ -103,6 +104,7 @@ impl ComputeQueue::ver {
             notifier_list,
             notifier,
             id,
+            command_count: AtomicU32::new(0),
         });
 
         mod_dev_dbg!(dev, "[ComputeQueue {}] ComputeQueue created\n", id);
@@ -193,6 +195,15 @@ impl file::Queue for ComputeQueue::ver {
 
         mod_dev_dbg!(self.dev, "[Submission {}] UUID = {:#x?}\n", id, uuid);
 
+        let cmd_seq = self.command_count.fetch_add(1, Ordering::Relaxed);
+
+        mod_dev_dbg!(
+            self.dev,
+            "[Submission {}] Command seq = {:#x?}\n",
+            id,
+            cmd_seq
+        );
+
         let comp = GpuObject::new_prealloc(
             kalloc.private.prealloc()?,
             |ptr: GpuWeakPointer<fw::compute::RunCompute::ver>| {
@@ -208,8 +219,8 @@ impl file::Queue for ComputeQueue::ver {
                     work_queue: self.wq.info_pointer(),
                     vm_slot: vm_bind.slot(),
                     unk_28: 0x1,
-                    counter1: 0, // ?
-                    counter2: 0, // ?
+                    event_generation: self.id as u32,
+                    cmd_seq,
                     unk_34: 0x0,
                     unk_38: 0x0,
                     job_params2: inner_weak_ptr!(ptr, job_params2),
