@@ -945,7 +945,7 @@ pub(crate) mod raw {
         pub(crate) unk_8900_0: u32,
 
         pub(crate) unk_8900: u32,
-        pub(crate) unk_atomic: u32,
+        pub(crate) pending_submissions: AtomicU32,
         pub(crate) max_power: u32,
         pub(crate) max_pstate_scaled: u32,
         pub(crate) max_pstate_scaled_2: u32,

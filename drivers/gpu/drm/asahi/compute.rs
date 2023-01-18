@@ -340,6 +340,7 @@ impl file::Queue for ComputeQueue::ver {
         batches.add(Box::try_new(comp)?)?;
         let batch = batches.commit()?;
 
+        let _op_guard = gpu.start_op()?;
         mod_dev_dbg!(self.dev, "[Submission {}] Submit compute!\n", id);
         gpu.submit_batch(batches)?;
 
