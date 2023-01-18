@@ -737,7 +737,7 @@ impl file::Queue for RenderQueue::ver {
                         busy_flag: 0,
                         tvb_overflow_count: 0,
                         unk_878: 0,
-                        encoder_params: fw::job::EncoderParams {
+                        encoder_params: fw::job::raw::EncoderParams {
                             unk_8: (cmdbuf.flags
                                 & bindings::ASAHI_CMDBUF_SET_WHEN_RELOADING_Z_OR_S as u64
                                 != 0) as u32,
@@ -757,7 +757,7 @@ impl file::Queue for RenderQueue::ver {
                             != 0) as u32,
                         unk_param: if unk2 { 1 } else { 0 }, // 1 for boot stuff?
                         unk_pointee: 0,
-                        meta: fw::job::JobMeta {
+                        meta: fw::job::raw::JobMeta {
                             unk_4: 0,
                             stamp: batches_frag.event().stamp_pointer(),
                             fw_stamp: batches_frag.event().fw_stamp_pointer(),
@@ -1017,7 +1017,7 @@ impl file::Queue for RenderQueue::ver {
                             unk_518: U64(0x0), // fixed
                             unk_520: U64(0x0), // fixed
                         },
-                        encoder_params: fw::job::EncoderParams {
+                        encoder_params: fw::job::raw::EncoderParams {
                             unk_8: 0x0,  // fixed
                             unk_c: 0x0,  // fixed
                             unk_10: 0x0, // fixed
@@ -1035,7 +1035,7 @@ impl file::Queue for RenderQueue::ver {
                             || unk4) as u32,
                         unk_568: 0,
                         unk_56c: 0,
-                        meta: fw::job::JobMeta {
+                        meta: fw::job::raw::JobMeta {
                             unk_4: 0,
                             stamp: batches_vtx.event().stamp_pointer(),
                             fw_stamp: batches_vtx.event().fw_stamp_pointer(),
