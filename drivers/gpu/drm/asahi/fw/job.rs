@@ -5,6 +5,7 @@
 //! Common job structures
 
 use super::types::*;
+use crate::trivial_gpustruct;
 
 pub(crate) mod raw {
     use super::*;
@@ -36,4 +37,12 @@ pub(crate) mod raw {
         pub(crate) unk_28: U64,
     }
 
+    #[derive(Debug, Clone, Copy, Default)]
+    #[repr(C)]
+    pub(crate) struct JobTimestamps {
+        pub(crate) start: U64,
+        pub(crate) end: U64,
+    }
 }
+
+trivial_gpustruct!(JobTimestamps);
