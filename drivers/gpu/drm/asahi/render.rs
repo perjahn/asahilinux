@@ -1131,6 +1131,8 @@ impl file::Queue for RenderQueue::ver {
             },
         )?;
 
+        core::mem::drop(alloc);
+
         notifier.threshold.with(|raw, _inner| {
             raw.increment();
         });

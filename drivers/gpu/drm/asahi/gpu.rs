@@ -15,6 +15,7 @@ use kernel::{
     time, PointerWrapper,
 };
 
+use crate::alloc::Allocator;
 use crate::box_in_place;
 use crate::debug::*;
 use crate::driver::AsahiDevice;
@@ -235,6 +236,7 @@ impl GpuManager::ver {
                 1024 * 1024,
                 true,
                 fmt!("Kernel Private"),
+                true,
             )?,
             shared: alloc::DefaultAllocator::new(
                 dev,
@@ -246,6 +248,7 @@ impl GpuManager::ver {
                 1024 * 1024,
                 true,
                 fmt!("Kernel Shared"),
+                false,
             )?,
             shared_ro: alloc::DefaultAllocator::new(
                 dev,
@@ -257,6 +260,7 @@ impl GpuManager::ver {
                 64 * 1024,
                 true,
                 fmt!("Kernel RO Shared"),
+                false,
             )?,
             gpu: alloc::DefaultAllocator::new(
                 dev,
@@ -268,6 +272,7 @@ impl GpuManager::ver {
                 64 * 1024,
                 true,
                 fmt!("Kernel GPU Shared"),
+                false,
             )?,
         };
 
@@ -677,7 +682,23 @@ impl GpuManager for GpuManager::ver {
     }
 
     fn alloc(&self) -> Guard<'_, Mutex<KernelAllocators>> {
-        self.alloc.lock()
+        let mut guard = self.alloc.lock();
+        let (garbage_count, garbage_bytes) = guard.private.garbage();
+        if garbage_bytes > 1024 * 1024 {
+            mod_dev_dbg!(
+                self.dev,
+                "Collecting kalloc garbage ({} objects, {} bytes)",
+                garbage_count,
+                garbage_bytes
+            );
+            if self.flush_fw_cache().is_err() {
+                dev_err!(self.dev, "Failed to flush FW cache");
+            } else {
+                guard.private.collect_garbage(garbage_count);
+            }
+        }
+
+        guard
     }
 
     fn new_vm(&self, file_id: u64) -> Result<mmu::Vm> {
@@ -770,6 +791,9 @@ impl GpuManager for GpuManager::ver {
             context.weak_pointer()
         );
 
+        let mut guard = self.alloc.lock();
+        let (garbage_count, _) = guard.private.garbage();
+
         let dc = context.with(|raw, _inner| DeviceControlMsg::DestroyContext {
             unk_4: 0,
             ctx_23: raw.unk_23,
@@ -804,6 +828,9 @@ impl GpuManager for GpuManager::ver {
             "GPU context invalidated: {:?}\n",
             context.weak_pointer()
         );
+
+        // The invalidation does a cache flush, so it is okay to collect garbage
+        guard.private.collect_garbage(garbage_count);
 
         Ok(())
     }
