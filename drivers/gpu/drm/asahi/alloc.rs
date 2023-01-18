@@ -161,6 +161,10 @@ pub(crate) trait Allocator {
     fn cpu_maps(&self) -> bool;
     fn min_align(&self) -> usize;
     fn alloc(&mut self, size: usize, align: usize) -> Result<Self::Raw>;
+    fn garbage(&self) -> (usize, usize) {
+        (0, 0)
+    }
+    fn collect_garbage(&mut self, _count: usize) {}
 
     #[inline(never)]
     fn new_object<T: GpuStruct>(
@@ -393,6 +397,7 @@ impl SimpleAllocator {
         _block_size: usize,
         mut cpu_maps: bool,
         _name: fmt::Arguments<'_>,
+        _keep_garbage: bool,
     ) -> Result<SimpleAllocator> {
         if debug_enabled(DebugFlags::ForceCPUMaps) {
             cpu_maps = true;
@@ -480,6 +485,8 @@ struct HeapAllocatorInner {
     dev: AsahiDevice,
     allocated: usize,
     backing_objects: Vec<(crate::gem::ObjectRef, u64)>,
+    garbage: Option<Vec<mm::Node<HeapAllocatorInner, HeapAllocationInner>>>,
+    total_garbage: usize,
     name: CString,
     vm_id: u64,
 }
@@ -490,9 +497,35 @@ pub(crate) struct HeapAllocationInner {
     real_size: usize,
 }
 
-pub(crate) struct HeapAllocation(mm::Node<HeapAllocatorInner, HeapAllocationInner>);
+pub(crate) struct HeapAllocation(Option<mm::Node<HeapAllocatorInner, HeapAllocationInner>>);
 
 impl HeapAllocation {}
+
+impl Drop for HeapAllocation {
+    fn drop(&mut self) {
+        let node = self.0.take().unwrap();
+        let size = node.size();
+        let alloc = node.inner_ref();
+
+        alloc.with(|a| {
+            if let Some(garbage) = a.garbage.as_mut() {
+                if garbage.try_push(node).is_err() {
+                    dev_err!(
+                        &a.dev,
+                        "HeapAllocation[{}]::drop: Failed to keep garbage",
+                        &*a.name,
+                    );
+                }
+                a.total_garbage += size as usize;
+                None
+            } else {
+                // We need to ensure node survives this scope, since dropping it
+                // will try to take the mm lock and deadlock us
+                Some(node)
+            }
+        });
+    }
+}
 
 impl mm::AllocInner<HeapAllocationInner> for HeapAllocatorInner {
     fn drop_object(
@@ -523,18 +556,18 @@ impl RawAllocation for HeapAllocation {
     // and objects are only ever added to it, this pointer is guaranteed to
     // remain valid for the lifetime of the HeapAllocation.
     fn ptr(&self) -> Option<NonNull<u8>> {
-        self.0.ptr
+        self.0.as_ref().unwrap().ptr
     }
     // SAFETY: This function must always return a valid GPU pointer.
     // See the explanation in ptr().
     fn gpu_ptr(&self) -> u64 {
-        self.0.start()
+        self.0.as_ref().unwrap().start()
     }
     fn size(&self) -> usize {
-        self.0.size() as usize
+        self.0.as_ref().unwrap().size() as usize
     }
     fn device(&self) -> &AsahiDevice {
-        &self.0.dev
+        &self.0.as_ref().unwrap().dev
     }
 }
 
@@ -565,6 +598,7 @@ impl HeapAllocator {
         block_size: usize,
         mut cpu_maps: bool,
         name: fmt::Arguments<'_>,
+        keep_garbage: bool,
     ) -> Result<HeapAllocator> {
         if !min_align.is_power_of_two() {
             return Err(EINVAL);
@@ -582,6 +616,8 @@ impl HeapAllocator {
             // TODO: This clearly needs a try_clone() or similar
             name: CString::try_from_fmt(fmt!("{}", &*name))?,
             vm_id: vm.id(),
+            garbage: if keep_garbage { Some(Vec::new()) } else { None },
+            total_garbage: 0,
         };
 
         let mm = mm::Allocator::new(start as u64, (end - start + 1) as u64, inner)?;
@@ -843,7 +879,42 @@ impl Allocator for HeapAllocator {
             start
         );
 
-        Ok(HeapAllocation(node))
+        Ok(HeapAllocation(Some(node)))
+    }
+
+    fn garbage(&self) -> (usize, usize) {
+        self.mm.with_inner(|inner| {
+            if let Some(g) = inner.garbage.as_ref() {
+                (g.len(), inner.total_garbage)
+            } else {
+                (0, 0)
+            }
+        })
+    }
+
+    fn collect_garbage(&mut self, count: usize) {
+        // Take the garbage out of the inner block, so we can safely drop it without deadlocking
+        let mut garbage = Vec::new();
+
+        if garbage.try_reserve(count).is_err() {
+            dev_crit!(
+                self.dev,
+                "HeapAllocator[{}]:collect_garbage: failed to reserve space",
+                &*self.name,
+            );
+            return;
+        }
+
+        self.mm.with_inner(|inner| {
+            if let Some(g) = inner.garbage.as_mut() {
+                for node in g.drain(0..count) {
+                    inner.total_garbage -= node.size() as usize;
+                    garbage
+                        .try_push(node)
+                        .expect("try_push() failed after reserve()");
+                }
+            }
+        });
     }
 }
 

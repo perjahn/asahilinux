@@ -126,6 +126,7 @@ impl File {
             512 * 1024,
             true,
             fmt!("File {} VM {} GPU Shared", file_id, id),
+            false,
         )?))?;
         let ualloc_priv = Arc::try_new(Mutex::new(alloc::DefaultAllocator::new(
             device,
@@ -137,6 +138,7 @@ impl File {
             64 * 1024,
             true,
             fmt!("File {} VM {} GPU FW Private", file_id, id),
+            false,
         )?))?;
 
         mod_dev_dbg!(

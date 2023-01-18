@@ -363,6 +363,8 @@ impl file::Queue for ComputeQueue::ver {
             },
         )?;
 
+        core::mem::drop(alloc);
+
         notifier.threshold.with(|raw, _inner| {
             raw.increment();
         });
