@@ -37,11 +37,11 @@ pub(crate) mod raw {
         pub(crate) unk_28: U64,
     }
 
-    #[derive(Debug, Clone, Copy, Default)]
+    #[derive(Debug, Default)]
     #[repr(C)]
     pub(crate) struct JobTimestamps {
-        pub(crate) start: U64,
-        pub(crate) end: U64,
+        pub(crate) start: AtomicU64,
+        pub(crate) end: AtomicU64,
     }
 }
 
