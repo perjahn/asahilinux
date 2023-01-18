@@ -721,19 +721,8 @@ impl GpuManager for GpuManager::ver {
             PipeType::Compute => &self.pipes.comp,
         };
 
-        /* TODO: need try_lock()
-        let pipe = 'outer: loop {
-            for p in pipes.iter() {
-                if let Ok(guard) = p.try_lock() {
-                    break 'outer guard;
-                }
-            }
-            break pipes[0].lock();
-        };
-        */
-
-        let index: usize = 0;
-        let mut pipe = pipes[index].lock();
+        let index: usize = batch.priority() as usize;
+        let mut pipe = pipes.get(index).ok_or(EIO)?.lock();
 
         batch.submit(&mut pipe)?;
 

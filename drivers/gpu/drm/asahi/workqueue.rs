@@ -79,6 +79,7 @@ struct WorkQueueInner {
     batches: Vec<Arc<Batch>>,
     last_token: Option<event::Token>,
     event: Option<(event::Event, event::EventValue)>,
+    priority: u32,
 }
 
 unsafe impl Send for WorkQueueInner {}
@@ -168,6 +169,7 @@ impl WorkQueue {
             batches: Vec::new(),
             last_token: None,
             event: None,
+            priority,
         };
 
         let mut queue = Pin::from(UniqueArc::try_new(Self {
@@ -427,6 +429,10 @@ impl<'a> WorkQueueBatch<'a> {
 
     pub(crate) fn pipe_type(&self) -> PipeType {
         self.inner.pipe_type
+    }
+
+    pub(crate) fn priority(&self) -> u32 {
+        self.inner.priority
     }
 }
 
