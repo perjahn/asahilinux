@@ -245,6 +245,7 @@ impl file::Queue for ComputeQueue::ver {
                     notifier_buf: inner_weak_ptr!(notifier.weak_pointer(), state.unk_buf),
                 })?;
 
+                /*
                 builder.add(microseq::Timestamp::ver {
                     header: microseq::op::Timestamp::new(true),
                     cur_ts: inner_weak_ptr!(ptr, cur_ts),
@@ -257,11 +258,13 @@ impl file::Queue for ComputeQueue::ver {
                     uuid,
                     unk_30_padding: 0,
                 })?;
+                */
 
                 builder.add(microseq::WaitForIdle {
                     header: microseq::op::WaitForIdle::new(microseq::Pipe::Compute),
                 })?;
 
+                /*
                 builder.add(microseq::Timestamp::ver {
                     header: microseq::op::Timestamp::new(false),
                     cur_ts: inner_weak_ptr!(ptr, cur_ts),
@@ -274,6 +277,7 @@ impl file::Queue for ComputeQueue::ver {
                     uuid,
                     unk_30_padding: 0,
                 })?;
+                */
 
                 let off = builder.offset_to(start_comp);
                 builder.add(microseq::FinalizeCompute::ver {
