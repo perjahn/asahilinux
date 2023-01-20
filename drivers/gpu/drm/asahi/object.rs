@@ -25,7 +25,7 @@ use crate::debug::*;
 
 const DEBUG_CLASS: DebugFlags = DebugFlags::Object;
 
-#[repr(C, packed(4))]
+#[repr(C, packed(1))]
 pub(crate) struct GpuPointer<'a, T: ?Sized>(NonZeroU64, PhantomData<&'a T>);
 
 impl<'a, T: ?Sized> GpuPointer<'a, T> {
@@ -49,7 +49,7 @@ impl<'a, T: ?Sized> fmt::Debug for GpuPointer<'a, T> {
     }
 }
 
-#[repr(C, packed(4))]
+#[repr(C, packed(1))]
 pub(crate) struct GpuWeakPointer<T: ?Sized>(NonZeroU64, PhantomData<*const T>);
 
 impl<T: ?Sized> Copy for GpuWeakPointer<T> {}
