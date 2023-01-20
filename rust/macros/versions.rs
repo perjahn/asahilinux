@@ -55,9 +55,6 @@ static AGX_VERSIONS: VersionConfig = VersionConfig {
         // &["G14", "V13_0B4"],
         &["G13", "V13_2"],
         &["G14", "V13_2"],
-        // &["G13X", "V12_3"],
-        // &["G13X", "V13_0B4"],
-        // &["G14G", "V13_0B4"],
     ],
 };
 
