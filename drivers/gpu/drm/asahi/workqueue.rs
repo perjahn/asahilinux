@@ -156,14 +156,18 @@ impl WorkQueue::ver {
                         busy: Default::default(),
                         __pad: Default::default(),
                         unk_84_state: Default::default(),
-                        unk_88: Default::default(),
-                        unk_8c: Default::default(),
-                        unk_90: Default::default(),
-                        unk_94: Default::default(),
+                        unk_88: 0,
+                        unk_8c: 0,
+                        unk_90: 0,
+                        unk_94: 0,
                         pending: Default::default(),
-                        unk_9c: Default::default(),
+                        unk_9c: 0,
+                        #[ver(V >= V13_2)]
+                        unk_a0_0: 0,
                         gpu_context: gpu_context,
                         unk_a8: Default::default(),
+                        #[ver(V >= V13_2)]
+                        unk_b0: 0,
                     }
                 ))
             })?,

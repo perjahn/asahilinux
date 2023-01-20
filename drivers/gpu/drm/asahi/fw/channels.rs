@@ -130,6 +130,9 @@ pub(crate) struct RunWorkQueueMsg {
     pub(crate) wptr: u32,
     pub(crate) event_slot: u32,
     pub(crate) is_new: bool,
+    #[ver(V >= V13_2 && G >= G14)]
+    pub(crate) __pad: Pad<0x2b>,
+    #[ver(V < V13_2 || G < G14)]
     pub(crate) __pad: Pad<0x1b>,
 }
 
@@ -137,7 +140,16 @@ pub(crate) struct RunWorkQueueMsg {
 pub(crate) type PipeMsg = RunWorkQueueMsg::ver;
 
 #[versions(AGX)]
-pub(crate) const DEVICECONTROL_SZ: usize = 0x2c;
+pub(crate) const DEVICECONTROL_SZ: usize = {
+    #[ver(V < V13_2 || G < G14)]
+    {
+        0x2c
+    }
+    #[ver(V >= V13_2 && G >= G14)]
+    {
+        0x3c
+    }
+};
 
 // TODO: clean up when arbitrary_enum_discriminant is stable
 // https://github.com/rust-lang/rust/issues/60553
