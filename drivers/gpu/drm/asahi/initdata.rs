@@ -149,11 +149,15 @@ impl<'a> InitDataBuilder::ver<'a> {
                 let period_ms = pwr.power_sample_period;
                 let period_s = F32::from(period_ms) / f32!(1000.0);
                 let ppm_filter_tc_periods = pwr.ppm_filter_time_constant_ms / period_ms;
+                #[ver(V >= V13_0B4)]
+                let ppm_filter_tc_ms_rounded = ppm_filter_tc_periods * period_ms;
                 let ppm_filter_a = f32!(1.0) / ppm_filter_tc_periods.into();
                 let perf_filter_a = f32!(1.0) / pwr.perf_filter_time_constant.into();
                 let perf_filter_a2 = f32!(1.0) / pwr.perf_filter_time_constant2.into();
                 let avg_power_target_filter_a = f32!(1.0) / pwr.avg_power_target_filter_tc.into();
                 let avg_power_filter_tc_periods = pwr.avg_power_filter_tc_ms / period_ms;
+                #[ver(V >= V13_0B4)]
+                let avg_power_filter_tc_ms_rounded = avg_power_filter_tc_periods * period_ms;
                 let avg_power_filter_a = f32!(1.0) / avg_power_filter_tc_periods.into();
                 let pwr_filter_a = f32!(1.0) / pwr.pwr_filter_time_constant.into();
 
@@ -164,8 +168,6 @@ impl<'a> InitDataBuilder::ver<'a> {
                 let boost_ps_count = max_ps - base_ps;
 
                 let base_clock_khz = self.cfg.base_clock_hz / 1000;
-                #[ver(V >= V13_0B4)]
-                let base_clock_mhz = self.cfg.base_clock_hz / 1_000_000;
                 let clocks_per_period = base_clock_khz * period_ms;
 
                 let raw = place!(
@@ -208,7 +210,7 @@ impl<'a> InitDataBuilder::ver<'a> {
                         cur_power_mw_2: 0x0,
                         ppm_filter_tc_ms: pwr.ppm_filter_time_constant_ms,
                         #[ver(V >= V13_0B4)]
-                        unk_730_0: 0x232800,
+                        ppm_filter_tc_clks: ppm_filter_tc_ms_rounded * base_clock_khz,
                         perf_tgt_utilization: pwr.perf_tgt_utilization,
                         perf_boost_min_util: pwr.perf_boost_min_util,
                         perf_boost_ce_step: pwr.perf_boost_ce_step,
@@ -268,7 +270,9 @@ impl<'a> InitDataBuilder::ver<'a> {
                         avg_power_target_filter_tc_xperiod: period_ms
                             * pwr.avg_power_target_filter_tc,
                         #[ver(V >= V13_0B4)]
-                        base_clock_mhz: base_clock_mhz,
+                        avg_power_target_filter_tc_clks: period_ms
+                            * pwr.avg_power_target_filter_tc
+                            * base_clock_khz,
                         avg_power_filter_tc_periods_x4: 4 * avg_power_filter_tc_periods,
                         avg_power_filter_a_neg: f32!(1.0) - avg_power_filter_a,
                         avg_power_filter_a: avg_power_filter_a,
@@ -280,9 +284,9 @@ impl<'a> InitDataBuilder::ver<'a> {
                         max_pstate_scaled_13: max_ps_scaled,
                         max_power_7: pwr.max_power_mw.into(),
                         max_power_8: pwr.max_power_mw,
-                        unk_d4c: pwr.avg_power_filter_tc_ms,
+                        avg_power_filter_tc_ms: pwr.avg_power_filter_tc_ms,
                         #[ver(V >= V13_0B4)]
-                        base_clock_mhz_2: base_clock_mhz,
+                        avg_power_filter_tc_clks: avg_power_filter_tc_ms_rounded * base_clock_khz,
                         max_pstate_scaled_14: max_ps_scaled,
                         t81xx_data: match self.cfg.chip_id {
                             0x8103 | 0x8112 => Self::t81xx_data(self.dyncfg),
@@ -297,9 +301,9 @@ impl<'a> InitDataBuilder::ver<'a> {
                             unk_4c: 50,
                             unk_54: 50,
                             unk_58: 0x1,
-                            unk_60: f32!(0.88888888),
-                            unk_64: f32!(0.66666666),
-                            unk_68: f32!(0.111111111),
+                            unk_60: f32!(0.8888889),
+                            unk_64: f32!(0.6666667),
+                            unk_68: f32!(0.11111111),
                             unk_6c: f32!(0.33333333),
                             unk_70: f32!(-0.4),
                             unk_74: f32!(-0.8),
@@ -307,7 +311,7 @@ impl<'a> InitDataBuilder::ver<'a> {
                             unk_80: f32!(-5.0),
                             unk_84: f32!(-10.0),
                             unk_8c: 40,
-                            unk_90: 600,
+                            max_pstate_scaled_1: max_ps_scaled,
                             unk_9c: f32!(8000.0),
                             unk_a0: 1400,
                             unk_a8: 72,
@@ -317,16 +321,16 @@ impl<'a> InitDataBuilder::ver<'a> {
                             unk_c4: f32!(65536.0),
                             unk_114: f32!(65536.0),
                             unk_124: 40,
-                            unk_128: 600,
+                            max_pstate_scaled_2: max_ps_scaled,
                             ..Default::default()
                         },
                         fast_die0_sensor_mask_2: U64(self.cfg.fast_die0_sensor_mask),
                         unk_e24: self.cfg.da.unk_e24,
                         unk_e28: 1,
                         fast_die0_sensor_mask_alt: U64(self.cfg.fast_die0_sensor_mask_alt),
-                        fast_die0_sensor_present: self.cfg.fast_die0_sensor_present,
                         #[ver(V < V13_0B4)]
-                        unk_1638: Array::new([0, 0, 0, 0, 1, 0, 0, 0]),
+                        fast_die0_sensor_present: U64(self.cfg.fast_die0_sensor_present as u64),
+                        unk_163c: 1,
                         unk_3644: 0,
                         hws1: Self::hw_shared1(self.cfg),
                         hws2: *Self::hw_shared2(self.cfg)?,
@@ -505,7 +509,6 @@ impl<'a> InitDataBuilder::ver<'a> {
                         #[ver(V >= V13_0B4)]
                         unk_2c_0: 0,
                         unk_2c: 1,
-                        // 0 on G13G >=13.0b4 and G13X all versions?
                         unk_30: 0,
                         unk_34: 120,
                         sub: raw::GlobalsSub::ver {
@@ -571,9 +574,9 @@ impl<'a> InitDataBuilder::ver<'a> {
                         #[ver(V >= V13_0B4)]
                         unk_118e4_0: 50,
                         #[ver(V >= V13_0B4)]
-                        unk_11edc: 8,
+                        unk_11edc: 0,
                         #[ver(V >= V13_0B4)]
-                        unk_11efc: 8,
+                        unk_11efc: 0,
                         ..Default::default()
                     }
                 );

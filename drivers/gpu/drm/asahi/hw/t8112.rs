@@ -51,8 +51,9 @@ pub(crate) const HWCONFIG: super::HwConfig = HwConfig {
     shared2_tab: &[-1, -1, -1, -1, -1, -1, -1, -1, 0xaa5aa, 0],
     shared2_unk_508: 0xc00000,
     sram_k: f32!(1.02),
-    unk_coef_a: &[&f32!([0.0, 0.0, 0.0, 0.0, 5.3, 0.0, 5.3, 6.6])],
-    unk_coef_b: &[&f32!([0.0, 0.0, 0.0, 0.0, 5.3, 0.0, 5.3, 6.6])],
+    // 13.2: last coef changed from 6.6 to 5.3, assuming that was a fix we can backport
+    unk_coef_a: &[&f32!([0.0, 0.0, 0.0, 0.0, 5.3, 0.0, 5.3, /*6.6*/ 5.3])],
+    unk_coef_b: &[&f32!([0.0, 0.0, 0.0, 0.0, 5.3, 0.0, 5.3, /*6.6*/ 5.3])],
     global_tab: None,
     fast_die0_sensor_mask: 0x6800,
     fast_die0_sensor_mask_alt: 0x6800,

@@ -237,7 +237,7 @@ impl file::Queue for ComputeQueue::ver {
                     work_queue: self.wq.info_pointer(),
                     unk_24: U64(0),
                     #[ver(V >= V13_0B4)]
-                    ts_flag: inner_weak_ptr!(ptr, ts_flag),
+                    unk_ts: inner_weak_ptr!(ptr, unk_ts),
                     uuid,
                     unk_30_padding: 0,
                 })?;
@@ -254,7 +254,7 @@ impl file::Queue for ComputeQueue::ver {
                     work_queue: self.wq.info_pointer(),
                     unk_24: U64(0),
                     #[ver(V >= V13_0B4)]
-                    ts_flag: inner_weak_ptr!(ptr, ts_flag),
+                    unk_ts: inner_weak_ptr!(ptr, unk_ts),
                     uuid,
                     unk_30_padding: 0,
                 })?;
@@ -280,7 +280,7 @@ impl file::Queue for ComputeQueue::ver {
                     unk_50: 0,
                     unk_54: 0,
                     unk_58: 0,
-                    #[ver(G >= G14)]
+                    #[ver(G == G14 && V < V13_0B4)]
                     unk_5c_g14: U64(0),
                     restart_branch_offset: off,
                     unk_60: if unk3 { 1 } else { 0 },

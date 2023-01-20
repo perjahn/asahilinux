@@ -116,7 +116,7 @@ pub(crate) struct Timestamp<'a> {
     pub(crate) unk_24: U64,
 
     #[ver(V >= V13_0B4)]
-    pub(crate) ts_flag: GpuWeakPointer<u8>,
+    pub(crate) unk_ts: GpuWeakPointer<U64>,
 
     pub(crate) uuid: u32,
     pub(crate) unk_30_padding: u32,
@@ -155,16 +155,14 @@ pub(crate) struct StartVertex<'a> {
     pub(crate) unk_168: u32,
     pub(crate) unk_16c: u32,
     pub(crate) unk_170: U64,
-    pub(crate) unk_178: u32,
 
     #[ver(V >= V13_0B4)]
-    pub(crate) unk_17c: u32,
+    pub(crate) counter: U64,
 
     #[ver(V >= V13_0B4)]
     pub(crate) notifier_buf: GpuWeakPointer<Array<0x8, u8>>,
 
-    #[ver(V >= V13_0B4)]
-    pub(crate) unk_188: u32,
+    pub(crate) unk_178: u32,
 }
 
 #[versions(AGX)]
@@ -194,7 +192,7 @@ pub(crate) struct FinalizeVertex {
     pub(crate) unk_64: u32,
     pub(crate) unk_68: u32,
 
-    #[ver(G >= G14)]
+    #[ver(G >= G14 && V < V13_0B4)]
     pub(crate) unk_68_g14: U64,
 
     pub(crate) restart_branch_offset: i32,
@@ -248,7 +246,7 @@ pub(crate) struct StartFragment<'a> {
     pub(crate) unk_190: u32,
 
     #[ver(V >= V13_0B4)]
-    pub(crate) unk_194: U64,
+    pub(crate) counter: U64,
 
     #[ver(V >= V13_0B4)]
     pub(crate) notifier_buf: GpuWeakPointer<Array<0x8, u8>>,
@@ -284,7 +282,7 @@ pub(crate) struct FinalizeFragment {
     pub(crate) unk_84: U64,
     pub(crate) unk_8c: U64,
 
-    #[ver(G >= G14)]
+    #[ver(G == G14 && V < V13_0B4)]
     pub(crate) unk_8c_g14: U64,
 
     pub(crate) restart_branch_offset: i32,
@@ -343,7 +341,7 @@ pub(crate) struct FinalizeCompute<'a> {
     pub(crate) unk_54: u32,
     pub(crate) unk_58: u32,
 
-    #[ver(G >= G14)]
+    #[ver(G == G14 && V < V13_0B4)]
     pub(crate) unk_5c_g14: U64,
 
     pub(crate) restart_branch_offset: i32,
