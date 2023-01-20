@@ -295,6 +295,7 @@ pub(crate) struct FinalizeFragment {
 #[versions(AGX)]
 impl Operation for FinalizeFragment::ver {}
 
+#[versions(AGX)]
 #[derive(Debug)]
 #[repr(C)]
 pub(crate) struct StartCompute<'a> {
@@ -309,13 +310,23 @@ pub(crate) struct StartCompute<'a> {
     pub(crate) cmd_seq: u32,
     pub(crate) unk_34: u32,
     pub(crate) unk_38: u32,
-    pub(crate) job_params2: GpuWeakPointer<compute::raw::JobParameters2<'a>>,
+    pub(crate) job_params2: GpuWeakPointer<compute::raw::JobParameters2::ver<'a>>,
     pub(crate) unk_44: u32,
     pub(crate) uuid: u32,
     pub(crate) padding: Array<0x108, u8>,
+
+    #[ver(V >= V13_0B4)]
+    pub(crate) unk_flag: GpuWeakPointer<U32>,
+
+    #[ver(V >= V13_0B4)]
+    pub(crate) counter: U64,
+
+    #[ver(V >= V13_0B4)]
+    pub(crate) notifier_buf: GpuWeakPointer<Array<0x8, u8>>,
 }
 
-impl<'a> Operation for StartCompute<'a> {}
+#[versions(AGX)]
+impl<'a> Operation for StartCompute::ver<'a> {}
 
 #[versions(AGX)]
 #[derive(Debug)]
@@ -325,8 +336,9 @@ pub(crate) struct FinalizeCompute<'a> {
     pub(crate) stats: GpuWeakPointer<initdata::GpuStatsComp>,
     pub(crate) work_queue: GpuWeakPointer<workqueue::QueueInfo>,
     pub(crate) vm_slot: u32,
+    #[ver(V < V13_0B4)]
     pub(crate) unk_18: u32,
-    pub(crate) job_params2: GpuWeakPointer<compute::raw::JobParameters2<'a>>,
+    pub(crate) job_params2: GpuWeakPointer<compute::raw::JobParameters2::ver<'a>>,
     pub(crate) unk_24: u32,
     pub(crate) uuid: u32,
     pub(crate) fw_stamp: GpuWeakPointer<FwStamp>,
@@ -346,6 +358,15 @@ pub(crate) struct FinalizeCompute<'a> {
 
     pub(crate) restart_branch_offset: i32,
     pub(crate) unk_60: u32,
+
+    #[ver(V >= V13_0B4)]
+    pub(crate) unk_64: Array<0xd, u8>,
+
+    #[ver(V >= V13_0B4)]
+    pub(crate) unk_flag: GpuWeakPointer<U32>,
+
+    #[ver(V >= V13_0B4)]
+    pub(crate) unk_79: Array<0x7, u8>,
 }
 
 #[versions(AGX)]

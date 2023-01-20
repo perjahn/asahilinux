@@ -35,7 +35,12 @@ pub(crate) struct ComputeQueue {
     notifier_list: GpuObject<fw::event::NotifierList>,
     notifier: Arc<GpuObject<fw::event::Notifier::ver>>,
     id: u64,
+    // Command count for this queue
     command_count: AtomicU32,
+    // Command count (potentially) shared with other queues
+    // we just implement this locally here.
+    #[ver(V >= V13_0B4)]
+    counter: AtomicU64,
 }
 
 #[versions(AGX)]
@@ -105,6 +110,8 @@ impl ComputeQueue::ver {
             notifier,
             id,
             command_count: AtomicU32::new(0),
+            #[ver(V >= V13_0B4)]
+            counter: AtomicU64::new(0),
         });
 
         mod_dev_dbg!(dev, "[ComputeQueue {}] ComputeQueue created\n", id);
@@ -204,6 +211,9 @@ impl file::Queue for ComputeQueue::ver {
             cmd_seq
         );
 
+        #[ver(V >= V13_0B4)]
+        let count = self.counter.fetch_add(1, Ordering::Relaxed);
+
         let comp = GpuObject::new_prealloc(
             kalloc.private.prealloc()?,
             |ptr: GpuWeakPointer<fw::compute::RunCompute::ver>| {
@@ -211,7 +221,7 @@ impl file::Queue for ComputeQueue::ver {
 
                 let stats = gpu.initdata.runtime_pointers.stats.comp.weak_pointer();
 
-                let start_comp = builder.add(microseq::StartCompute {
+                let start_comp = builder.add(microseq::StartCompute::ver {
                     header: microseq::op::StartCompute::HEADER,
                     unk_pointer: inner_weak_ptr!(ptr, unk_pointee),
                     job_params1: inner_weak_ptr!(ptr, job_params1),
@@ -227,6 +237,12 @@ impl file::Queue for ComputeQueue::ver {
                     unk_44: 0x0,
                     uuid,
                     padding: Default::default(),
+                    #[ver(V >= V13_0B4)]
+                    unk_flag: inner_weak_ptr!(ptr, unk_flag),
+                    #[ver(V >= V13_0B4)]
+                    counter: U64(count),
+                    #[ver(V >= V13_0B4)]
+                    notifier_buf: inner_weak_ptr!(notifier.weak_pointer(), state.unk_buf),
                 })?;
 
                 builder.add(microseq::Timestamp::ver {
@@ -265,6 +281,7 @@ impl file::Queue for ComputeQueue::ver {
                     stats,
                     work_queue: self.wq.info_pointer(),
                     vm_slot: vm_bind.slot(),
+                    #[ver(V < V13_0B4)]
                     unk_18: 0,
                     job_params2: inner_weak_ptr!(ptr, job_params2),
                     unk_24: 0,
@@ -284,6 +301,12 @@ impl file::Queue for ComputeQueue::ver {
                     unk_5c_g14: U64(0),
                     restart_branch_offset: off,
                     unk_60: if unk3 { 1 } else { 0 },
+                    #[ver(V >= V13_0B4)]
+                    unk_64: Default::default(),
+                    #[ver(V >= V13_0B4)]
+                    unk_flag: inner_weak_ptr!(ptr, unk_flag),
+                    #[ver(V >= V13_0B4)]
+                    unk_79: Default::default(),
                 })?;
 
                 builder.add(microseq::RetireStamp {
@@ -304,6 +327,8 @@ impl file::Queue for ComputeQueue::ver {
                     ptr,
                     fw::compute::raw::RunCompute::ver {
                         tag: fw::workqueue::CommandType::RunCompute,
+                        #[ver(V >= V13_0B4)]
+                        counter: U64(count),
                         unk_4: 0,
                         vm_slot: vm_bind.slot(),
                         notifier: inner.notifier.gpu_pointer(),
@@ -330,11 +355,15 @@ impl file::Queue for ComputeQueue::ver {
                         unk_b8: Default::default(),
                         microsequence: inner.micro_seq.gpu_pointer(),
                         microsequence_size: inner.micro_seq.len() as u32,
-                        job_params2: fw::compute::raw::JobParameters2 {
+                        job_params2: fw::compute::raw::JobParameters2::ver {
+                            #[ver(V >= V13_0B4)]
+                            unk_0_0: 0,
                             unk_0: Default::default(),
                             preempt_buf1: inner.preempt_buf.gpu_pointer(),
                             encoder_end: U64(cmdbuf.encoder_end),
                             unk_34: Default::default(),
+                            #[ver(V < V13_0B4)]
+                            unk_5c: 0,
                         },
                         encoder_params: fw::job::raw::EncoderParams {
                             unk_8: 0x0,  // fixed
@@ -365,11 +394,17 @@ impl file::Queue for ComputeQueue::ver {
                         unk_2c8: 0,
                         unk_2cc: 0,
                         client_sequence: slot_client_seq,
-                        unk_2d1: 0,
-                        unk_2d2: 0,
+                        pad_2d1: Default::default(),
                         unk_2d4: 0,
                         unk_2d8: 0,
-                        pad_2d9: Default::default(),
+                        #[ver(V >= V13_0B4)]
+                        unk_ts: U64(0),
+                        #[ver(V >= V13_0B4)]
+                        unk_2e1: Default::default(),
+                        #[ver(V >= V13_0B4)]
+                        unk_flag: U32(0),
+                        #[ver(V >= V13_0B4)]
+                        unk_pad: Default::default(),
                     }
                 ))
             },
