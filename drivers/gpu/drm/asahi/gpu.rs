@@ -156,7 +156,6 @@ pub(crate) trait GpuManager: Send + Sync {
         ualloc: Arc<Mutex<alloc::DefaultAllocator>>,
         priority: u32,
     ) -> Result<Box<dyn file::Queue>>;
-    fn submit_batch(&self, batch: workqueue::WorkQueueBatch<'_>) -> Result;
     fn ids(&self) -> &SequenceIDs;
     fn kick_firmware(&self) -> Result;
     fn invalidate_context(
@@ -640,6 +639,29 @@ impl GpuManager::ver {
     pub(crate) fn core_masks_packed(&self) -> &[u32] {
         self.dyncfg.id.core_masks_packed.as_slice()
     }
+
+    pub(crate) fn submit_batch(&self, batch: workqueue::WorkQueueBatch::ver<'_>) -> Result {
+        let pipe_type = batch.pipe_type();
+        let pipes = match pipe_type {
+            PipeType::Vertex => &self.pipes.vtx,
+            PipeType::Fragment => &self.pipes.frag,
+            PipeType::Compute => &self.pipes.comp,
+        };
+
+        let index: usize = batch.priority() as usize;
+        let mut pipe = pipes.get(index).ok_or(EIO)?.lock();
+
+        batch.submit(&mut pipe)?;
+
+        let mut guard = self.rtkit.lock();
+        let rtk = guard.as_mut().unwrap();
+        rtk.send_message(
+            EP_DOORBELL,
+            MSG_TX_DOORBELL | pipe_type as u64 | ((index as u64) << 2),
+        )?;
+
+        Ok(())
+    }
 }
 
 #[versions(AGX)]
@@ -748,29 +770,6 @@ impl GpuManager for GpuManager::ver {
             id,
             priority,
         )?)?)
-    }
-
-    fn submit_batch(&self, batch: workqueue::WorkQueueBatch<'_>) -> Result {
-        let pipe_type = batch.pipe_type();
-        let pipes = match pipe_type {
-            PipeType::Vertex => &self.pipes.vtx,
-            PipeType::Fragment => &self.pipes.frag,
-            PipeType::Compute => &self.pipes.comp,
-        };
-
-        let index: usize = batch.priority() as usize;
-        let mut pipe = pipes.get(index).ok_or(EIO)?.lock();
-
-        batch.submit(&mut pipe)?;
-
-        let mut guard = self.rtkit.lock();
-        let rtk = guard.as_mut().unwrap();
-        rtk.send_message(
-            EP_DOORBELL,
-            MSG_TX_DOORBELL | pipe_type as u64 | ((index as u64) << 2),
-        )?;
-
-        Ok(())
     }
 
     fn kick_firmware(&self) -> Result {

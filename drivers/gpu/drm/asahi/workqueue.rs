@@ -68,6 +68,7 @@ impl Batch {
     }
 }
 
+#[versions(AGX)]
 struct WorkQueueInner {
     event_manager: Arc<event::EventManager>,
     info: GpuObject<QueueInfo>,
@@ -82,17 +83,20 @@ struct WorkQueueInner {
     priority: u32,
 }
 
-unsafe impl Send for WorkQueueInner {}
+#[versions(AGX)]
+unsafe impl Send for WorkQueueInner::ver {}
 
+#[versions(AGX)]
 pub(crate) struct WorkQueue {
     info_pointer: GpuWeakPointer<QueueInfo>,
-    inner: Mutex<WorkQueueInner>,
+    inner: Mutex<WorkQueueInner::ver>,
     cond: CondVar,
 }
 
 const WQ_SIZE: u32 = 0x500;
 
-impl WorkQueueInner {
+#[versions(AGX)]
+impl WorkQueueInner::ver {
     fn doneptr(&self) -> u32 {
         self.info
             .state
@@ -100,15 +104,17 @@ impl WorkQueueInner {
     }
 }
 
+#[versions(AGX)]
 pub(crate) struct WorkQueueBatch<'a> {
-    queue: &'a WorkQueue,
-    inner: Guard<'a, Mutex<WorkQueueInner>>,
+    queue: &'a WorkQueue::ver,
+    inner: Guard<'a, Mutex<WorkQueueInner::ver>>,
     commands: usize,
     wptr: u32,
     vm_slot: u32,
 }
 
-impl WorkQueue {
+#[versions(AGX)]
+impl WorkQueue::ver {
     pub(crate) fn new(
         alloc: &mut gpu::KernelAllocators,
         event_manager: Arc<event::EventManager>,
@@ -117,7 +123,7 @@ impl WorkQueue {
         pipe_type: PipeType,
         id: u64,
         priority: u32,
-    ) -> Result<Arc<WorkQueue>> {
+    ) -> Result<Arc<WorkQueue::ver>> {
         let mut info = box_in_place!(QueueInfo {
             state: alloc.shared.new_default::<RingState>()?,
             ring: alloc.shared.array_empty(WQ_SIZE as usize)?,
@@ -128,7 +134,7 @@ impl WorkQueue {
             raw.rb_size = WQ_SIZE;
         });
 
-        let inner = WorkQueueInner {
+        let inner = WorkQueueInner::ver {
             event_manager,
             info: alloc.private.new_boxed(info, |inner, ptr| {
                 Ok(place!(
@@ -203,7 +209,10 @@ impl WorkQueue {
         self.info_pointer
     }
 
-    pub(crate) fn begin_batch(this: &Arc<WorkQueue>, vm_slot: u32) -> Result<WorkQueueBatch<'_>> {
+    pub(crate) fn begin_batch(
+        this: &Arc<WorkQueue::ver>,
+        vm_slot: u32,
+    ) -> Result<WorkQueueBatch::ver<'_>> {
         let mut inner = this.inner.lock();
 
         if inner.event.is_none() {
@@ -213,7 +222,7 @@ impl WorkQueue {
             inner.event = Some((event, cur));
         }
 
-        Ok(WorkQueueBatch {
+        Ok(WorkQueueBatch::ver {
             queue: &*this,
             wptr: inner.wptr,
             inner,
@@ -221,8 +230,16 @@ impl WorkQueue {
             vm_slot,
         })
     }
+}
 
-    pub(crate) fn signal(&self) -> bool {
+pub(crate) trait WorkQueue {
+    fn signal(&self) -> bool;
+    fn mark_error(&self, value: event::EventValue, error: BatchError);
+}
+
+#[versions(AGX)]
+impl WorkQueue for WorkQueue::ver {
+    fn signal(&self) -> bool {
         let mut inner = self.inner.lock();
         let event = inner.event.as_ref();
         let cur_value = match event {
@@ -290,7 +307,7 @@ impl WorkQueue {
         empty
     }
 
-    pub(crate) fn mark_error(&self, value: event::EventValue, error: BatchError) {
+    fn mark_error(&self, value: event::EventValue, error: BatchError) {
         // If anything is marked completed, we can consider it successful
         // at this point, even if we didn't get the signal event yet.
         self.signal();
@@ -328,7 +345,8 @@ impl WorkQueue {
     }
 }
 
-impl<'a> WorkQueueBatch<'a> {
+#[versions(AGX)]
+impl<'a> WorkQueueBatch::ver<'a> {
     pub(crate) fn add<T: Command>(&mut self, command: Box<GpuObject<T>>) -> Result {
         let inner = &mut self.inner;
 
@@ -436,7 +454,8 @@ impl<'a> WorkQueueBatch<'a> {
     }
 }
 
-impl<'a> Drop for WorkQueueBatch<'a> {
+#[versions(AGX)]
+impl<'a> Drop for WorkQueueBatch::ver<'a> {
     fn drop(&mut self) {
         if self.commands != 0 {
             pr_warn!("WorkQueueBatch: rolling back {} commands!", self.commands);
@@ -448,5 +467,8 @@ impl<'a> Drop for WorkQueueBatch<'a> {
     }
 }
 
-unsafe impl Send for WorkQueue {}
-unsafe impl Sync for WorkQueue {}
+#[versions(AGX)]
+unsafe impl Send for WorkQueue::ver {}
+
+#[versions(AGX)]
+unsafe impl Sync for WorkQueue::ver {}
