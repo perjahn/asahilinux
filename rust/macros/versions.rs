@@ -241,7 +241,8 @@ pub(crate) fn versions(attr: TokenStream, item: TokenStream) -> TokenStream {
                 body.push(it.next().unwrap());
             }
             TokenTree::Ident(ident)
-                if ["struct", "enum", "union", "const"].contains(&ident.to_string().as_str()) =>
+                if ["struct", "enum", "union", "const", "type"]
+                    .contains(&ident.to_string().as_str()) =>
             {
                 is_struct = ident.to_string() != "const";
                 body.push(TokenTree::Ident(ident));
