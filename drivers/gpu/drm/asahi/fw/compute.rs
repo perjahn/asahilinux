@@ -33,13 +33,18 @@ pub(crate) mod raw {
         pub(crate) iogpu_unk_40: u32,
     }
 
+    #[versions(AGX)]
     #[derive(Debug)]
     #[repr(C)]
     pub(crate) struct JobParameters2<'a> {
+        #[ver(V >= V13_0B4)]
+        pub(crate) unk_0_0: u32,
         pub(crate) unk_0: Array<0x24, u8>,
         pub(crate) preempt_buf1: GpuPointer<'a, &'a [u8]>,
         pub(crate) encoder_end: U64,
-        pub(crate) unk_34: Array<0x2c, u8>,
+        pub(crate) unk_34: Array<0x28, u8>,
+        #[ver(V < V13_0B4)]
+        pub(crate) unk_5c: u32,
     }
 
     #[versions(AGX)]
@@ -47,6 +52,10 @@ pub(crate) mod raw {
     #[repr(C)]
     pub(crate) struct RunCompute<'a> {
         pub(crate) tag: workqueue::CommandType,
+
+        #[ver(V >= V13_0B4)]
+        pub(crate) counter: U64,
+
         pub(crate) unk_4: u32,
         pub(crate) vm_slot: u32,
         pub(crate) notifier: GpuPointer<'a, event::Notifier::ver>,
@@ -55,7 +64,7 @@ pub(crate) mod raw {
         pub(crate) unk_b8: Array<0x11c, u8>,
         pub(crate) microsequence: GpuPointer<'a, &'a [u8]>,
         pub(crate) microsequence_size: u32,
-        pub(crate) job_params2: JobParameters2<'a>,
+        pub(crate) job_params2: JobParameters2::ver<'a>,
         pub(crate) encoder_params: job::raw::EncoderParams<'a>,
         pub(crate) meta: job::raw::JobMeta,
         pub(crate) cur_ts: U64,
@@ -66,11 +75,17 @@ pub(crate) mod raw {
         pub(crate) unk_2c8: u32,
         pub(crate) unk_2cc: u32,
         pub(crate) client_sequence: u8,
-        pub(crate) unk_2d1: u8,
-        pub(crate) unk_2d2: u16,
+        pub(crate) pad_2d1: Array<3, u8>,
         pub(crate) unk_2d4: u32,
         pub(crate) unk_2d8: u8,
-        pub(crate) pad_2d9: Array<0x7, u8>,
+        #[ver(V >= V13_0B4)]
+        pub(crate) unk_ts: U64,
+        #[ver(V >= V13_0B4)]
+        pub(crate) unk_2e1: Array<0x1c, u8>,
+        #[ver(V >= V13_0B4)]
+        pub(crate) unk_flag: U32,
+        #[ver(V >= V13_0B4)]
+        pub(crate) unk_pad: Array<0x10, u8>,
     }
 }
 
