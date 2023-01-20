@@ -71,7 +71,7 @@ impl Batch {
 #[versions(AGX)]
 struct WorkQueueInner {
     event_manager: Arc<event::EventManager>,
-    info: GpuObject<QueueInfo>,
+    info: GpuObject<QueueInfo::ver>,
     new: bool,
     pipe_type: PipeType,
     size: u32,
@@ -88,7 +88,7 @@ unsafe impl Send for WorkQueueInner::ver {}
 
 #[versions(AGX)]
 pub(crate) struct WorkQueue {
-    info_pointer: GpuWeakPointer<QueueInfo>,
+    info_pointer: GpuWeakPointer<QueueInfo::ver>,
     inner: Mutex<WorkQueueInner::ver>,
     cond: CondVar,
 }
@@ -124,7 +124,7 @@ impl WorkQueue::ver {
         id: u64,
         priority: u32,
     ) -> Result<Arc<WorkQueue::ver>> {
-        let mut info = box_in_place!(QueueInfo {
+        let mut info = box_in_place!(QueueInfo::ver {
             state: alloc.shared.new_default::<RingState>()?,
             ring: alloc.shared.array_empty(WQ_SIZE as usize)?,
             gpu_buf: alloc.private.array_empty(0x2c18)?,
@@ -139,7 +139,7 @@ impl WorkQueue::ver {
             info: alloc.private.new_boxed(info, |inner, ptr| {
                 Ok(place!(
                     ptr,
-                    raw::QueueInfo {
+                    raw::QueueInfo::ver {
                         state: inner.state.gpu_pointer(),
                         ring: inner.ring.gpu_pointer(),
                         notifier_list: notifier_list,
@@ -205,7 +205,7 @@ impl WorkQueue::ver {
         Ok(queue.into())
     }
 
-    pub(crate) fn info_pointer(&self) -> GpuWeakPointer<QueueInfo> {
+    pub(crate) fn info_pointer(&self) -> GpuWeakPointer<QueueInfo::ver> {
         self.info_pointer
     }
 
