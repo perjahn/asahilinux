@@ -39,14 +39,14 @@ pub(crate) mod raw {
         pstamp_frag: Array<4, U64>,
         has_comp: u32,
         pstamp_comp: Array<4, U64>,
-        #[ver(G >= G14)]
+        #[ver(G >= G14 && V < V13_0B4)]
         unk_98_g14_0: Array<0x14, u8>,
         in_list: u32,
         list_head: LinkedListHead,
-        #[ver(G >= G14)]
+        #[ver(G >= G14 && V < V13_0B4)]
         unk_a8_g14_0: Pad<4>,
         #[ver(V >= V13_0B4)]
-        unk_buf: Array<0x8, u8>, // Init to all-ff
+        pub(crate) unk_buf: Array<0x8, u8>, // Init to all-ff
     }
 
     #[versions(AGX)]

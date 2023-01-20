@@ -129,7 +129,7 @@ pub(crate) mod raw {
         pub(crate) unk_84: F32,
         pub(crate) unk_88: u32,
         pub(crate) unk_8c: u32,
-        pub(crate) unk_90: u32,
+        pub(crate) max_pstate_scaled_1: u32,
         pub(crate) unk_94: u32,
         pub(crate) unk_98: u32,
         pub(crate) unk_9c: F32,
@@ -149,7 +149,7 @@ pub(crate) mod raw {
         pub(crate) unk_11c: u32,
         pub(crate) unk_120: u32,
         pub(crate) unk_124: u32,
-        pub(crate) unk_128: u32,
+        pub(crate) max_pstate_scaled_2: u32,
         pub(crate) unk_12c: Array<0x8c, u8>,
     }
 
@@ -201,7 +201,7 @@ pub(crate) mod raw {
         pub(crate) clocks_per_period: u32,
 
         #[ver(V >= V13_0B4)]
-        pub(crate) unk_8_0: u32,
+        pub(crate) clocks_per_period_2: u32,
 
         pub(crate) unk_8: u32,
         pub(crate) pwr_status: AtomicU32,
@@ -294,7 +294,7 @@ pub(crate) mod raw {
         pub(crate) unk_72c: u32,
 
         #[ver(V >= V13_0B4)]
-        pub(crate) unk_730_0: u32,
+        pub(crate) ppm_filter_tc_clks: u32,
 
         #[ver(V >= V13_0B4)]
         pub(crate) unk_730_4: u32,
@@ -409,8 +409,8 @@ pub(crate) mod raw {
         pub(crate) max_pstate_scaled_11: u32,
         pub(crate) freq_with_off: u32,
         pub(crate) unk_b9c: u32,
-        pub(crate) unk_ba0: u64,
-        pub(crate) unk_ba8: u64,
+        pub(crate) unk_ba0: U64,
+        pub(crate) unk_ba8: U64,
         pub(crate) unk_bb0: u32,
         pub(crate) unk_bb4: u32,
         pub(crate) pad_bb8: Pad<0x74>,
@@ -427,7 +427,7 @@ pub(crate) mod raw {
         pub(crate) avg_power_target_filter_tc_xperiod: u32,
 
         #[ver(V >= V13_0B4)]
-        pub(crate) base_clock_mhz: u32,
+        pub(crate) avg_power_target_filter_tc_clks: u32,
 
         #[ver(V >= V13_0B4)]
         pub(crate) unk_c58_4: u32,
@@ -454,11 +454,11 @@ pub(crate) mod raw {
         pub(crate) max_power_7: F32,
         pub(crate) max_power_8: u32,
         pub(crate) unk_d48: u32,
-        pub(crate) unk_d4c: u32,
+        pub(crate) avg_power_filter_tc_ms: u32,
         pub(crate) unk_d50: u32,
 
         #[ver(V >= V13_0B4)]
-        pub(crate) base_clock_mhz_2: u32,
+        pub(crate) avg_power_filter_tc_clks: u32,
 
         #[ver(V >= V13_0B4)]
         pub(crate) unk_d54_4: Array<0xc, u8>,
@@ -483,10 +483,10 @@ pub(crate) mod raw {
         pub(crate) unk_coef_b2: Array<8, Array<8, F32>>,
         pub(crate) pad_1048: Pad<0x5e4>,
         pub(crate) fast_die0_sensor_mask_alt: U64,
-        pub(crate) fast_die0_sensor_present: u32,
-
         #[ver(V < V13_0B4)]
-        pub(crate) unk_1638: Array<0x8, u8>,
+        pub(crate) fast_die0_sensor_present: U64,
+
+        pub(crate) unk_163c: u32,
 
         pub(crate) unk_1640: Array<0x2000, u8>,
         pub(crate) unk_3640: u32,
@@ -775,7 +775,7 @@ pub(crate) mod raw {
         pub(crate) total_cmds: u32,
         pub(crate) stats: GpuStatsVtx::ver,
         #[ver(V >= V13_0B4)]
-        pub(crate) unk_pad: Array<0x800, u8>,
+        pub(crate) unk_pad: Array<0x5c4, u8>,
     }
 
     #[versions(AGX)]
@@ -786,7 +786,7 @@ pub(crate) mod raw {
         pub(crate) unk_4: u32,
         pub(crate) stats: GpuStatsFrag::ver,
         #[ver(V >= V13_0B4)]
-        pub(crate) unk_pad: Array<0x800, u8>,
+        pub(crate) unk_pad: Array<0x580, u8>,
     }
 
     #[derive(Debug, Default)]
@@ -990,12 +990,12 @@ pub(crate) mod raw {
         pub(crate) unk_89f4: u32,
         pub(crate) hws1: HwDataShared1,
         pub(crate) hws2: HwDataShared2,
-        pub(crate) hws3: HwDataShared3,
-        pub(crate) unk_9004: Array<8, u8>,
 
         #[ver(V >= V13_0B4)]
-        pub(crate) unk_900c_0: Array<0x28, u8>,
+        pub(crate) unk_hws2_0: Array<0x28, u8>,
 
+        pub(crate) hws3: HwDataShared3,
+        pub(crate) unk_9004: Array<8, u8>,
         pub(crate) unk_900c: u32,
 
         #[ver(V >= V13_0B4)]

@@ -246,9 +246,7 @@ pub(crate) mod raw {
         pub(crate) unk_918: U64,
         pub(crate) unk_920: u32,
         pub(crate) client_sequence: u8,
-        pub(crate) unk_925: u8,
-        pub(crate) unk_926: u8,
-        pub(crate) unk_927: u8,
+        pub(crate) pad_925: Array<3, u8>,
 
         #[ver(V >= V13_0B4)]
         pub(crate) unk_928_0: u32,
@@ -257,13 +255,10 @@ pub(crate) mod raw {
         pub(crate) unk_928_4: u8,
 
         #[ver(V >= V13_0B4)]
-        pub(crate) ts_flag: u8,
+        pub(crate) unk_ts: U64,
 
         #[ver(V >= V13_0B4)]
-        pub(crate) unk_5e6: u16,
-
-        #[ver(V >= V13_0B4)]
-        pub(crate) unk_5e8: Array<0x20, u8>,
+        pub(crate) unk_928_d: Array<0x1b, u8>,
         // Alignment - handled by allocator
         //pad_928: [u8; 0x18],
     }

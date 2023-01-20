@@ -15,6 +15,7 @@ use crate::util::*;
 use crate::{alloc, buffer, channel, driver, event, file, fw, gem, gpu, microseq, mmu, workqueue};
 use crate::{box_in_place, inner_ptr, inner_weak_ptr, place};
 use core::mem::MaybeUninit;
+use core::sync::atomic::Ordering;
 use kernel::bindings;
 use kernel::drm::gem::BaseObject;
 use kernel::io_buffer::IoBufferReader;
@@ -38,6 +39,8 @@ pub(crate) struct RenderQueue {
     notifier_list: GpuObject<fw::event::NotifierList>,
     notifier: Arc<GpuObject<fw::event::Notifier::ver>>,
     id: u64,
+    #[ver(V >= V13_0B4)]
+    counter: AtomicU64,
 }
 
 #[versions(AGX)]
@@ -128,6 +131,8 @@ impl RenderQueue::ver {
             notifier_list,
             notifier,
             id,
+            #[ver(V >= V13_0B4)]
+            counter: AtomicU64::new(0),
         });
 
         mod_dev_dbg!(dev, "[RenderQueue {}] RenderQueue created\n", id);
@@ -458,6 +463,11 @@ impl file::Queue for RenderQueue::ver {
             _ => return Err(EINVAL),
         };
 
+        #[ver(V >= V13_0B4)]
+        let count_frag = self.counter.fetch_add(2, Ordering::Relaxed);
+        #[ver(V >= V13_0B4)]
+        let count_vtx = count_frag + 1;
+
         let frag = GpuObject::new_prealloc(
             kalloc.private.prealloc()?,
             |ptr: GpuWeakPointer<fw::fragment::RunFragment::ver>| {
@@ -512,9 +522,9 @@ impl file::Queue for RenderQueue::ver {
                     num_attachments,
                     unk_190: 0,
                     #[ver(V >= V13_0B4)]
-                    unk_194: U64(0),
+                    counter: U64(count_frag),
                     #[ver(V >= V13_0B4)]
-                    notifier_buf: inner_weak_ptr!(&notifier.weak_pointer(), state.unk_buf),
+                    notifier_buf: inner_weak_ptr!(notifier.weak_pointer(), state.unk_buf),
                 })?;
 
                 builder.add(microseq::Timestamp::ver {
@@ -525,7 +535,7 @@ impl file::Queue for RenderQueue::ver {
                     work_queue: self.wq_frag.info_pointer(),
                     unk_24: U64(0),
                     #[ver(V >= V13_0B4)]
-                    ts_flag: inner_weak_ptr!(ptr, ts_flag),
+                    unk_ts: inner_weak_ptr!(ptr, unk_ts),
                     uuid: uuid_3d,
                     unk_30_padding: 0,
                 })?;
@@ -542,7 +552,7 @@ impl file::Queue for RenderQueue::ver {
                     work_queue: self.wq_frag.info_pointer(),
                     unk_24: U64(0),
                     #[ver(V >= V13_0B4)]
-                    ts_flag: inner_weak_ptr!(ptr, ts_flag),
+                    unk_ts: inner_weak_ptr!(ptr, unk_ts),
                     uuid: uuid_3d,
                     unk_30_padding: 0,
                 })?;
@@ -571,7 +581,7 @@ impl file::Queue for RenderQueue::ver {
                     unk_7c: U64(0),
                     unk_84: U64(0),
                     unk_8c: U64(0),
-                    #[ver(G >= G14)]
+                    #[ver(G == G14 && V < V13_0B4)]
                     unk_8c_g14: U64(0),
                     restart_branch_offset: off,
                     unk_98: if unk3 { 1 } else { 0 },
@@ -599,7 +609,7 @@ impl file::Queue for RenderQueue::ver {
                     width: cmdbuf.fb_width,
                     height: cmdbuf.fb_height,
                     #[ver(V >= V13_0B4)]
-                    unk3: 0x100000,
+                    unk3: U64(0x100000),
                 };
 
                 Ok(place!(
@@ -607,7 +617,7 @@ impl file::Queue for RenderQueue::ver {
                     fw::fragment::raw::RunFragment::ver {
                         tag: fw::workqueue::CommandType::RunFragment,
                         #[ver(V >= V13_0B4)]
-                        counter: 1,
+                        counter: U64(count_frag),
                         vm_slot: vm_bind.slot(),
                         unk_8: 0,
                         microsequence: inner.micro_seq.gpu_pointer(),
@@ -757,7 +767,7 @@ impl file::Queue for RenderQueue::ver {
                             unk_380: U64(0x0),
                             unk_388: U64(0x0),
                             #[ver(V >= V13_0B4)]
-                            unk_390_0: 0x0,
+                            unk_390_0: U64(0x0),
                             depth_dimensions: U64(cmdbuf.depth_dimensions as u64),
                         },
                         unk_758_flag: 0,
@@ -808,19 +818,15 @@ impl file::Queue for RenderQueue::ver {
                         unk_918: U64(0),
                         unk_920: 0,
                         client_sequence: slot_client_seq,
-                        unk_925: 0,
-                        unk_926: 0,
-                        unk_927: 0,
+                        pad_925: Default::default(),
                         #[ver(V >= V13_0B4)]
                         unk_928_0: 0,
                         #[ver(V >= V13_0B4)]
                         unk_928_4: 0,
                         #[ver(V >= V13_0B4)]
-                        ts_flag: 0,
+                        unk_ts: U64(0),
                         #[ver(V >= V13_0B4)]
-                        unk_5e6: 0,
-                        #[ver(V >= V13_0B4)]
-                        unk_5e8: Default::default(),
+                        unk_928_d: Default::default(),
                     }
                 ))
             },
@@ -887,13 +893,11 @@ impl file::Queue for RenderQueue::ver {
                     unk_168: 0x0,               // fixed
                     unk_16c: 0x0,               // fixed
                     unk_170: U64(0x0),          // fixed
-                    unk_178: 0x0,               // fixed?
                     #[ver(V >= V13_0B4)]
-                    unk_17c: 0x0,
+                    counter: U64(count_vtx),
                     #[ver(V >= V13_0B4)]
-                    notifier_buf: inner_weak_ptr!(&notifier.weak_pointer(), state.unk_buf),
-                    #[ver(V >= V13_0B4)]
-                    unk_188: 0x0,
+                    notifier_buf: inner_weak_ptr!(notifier.weak_pointer(), state.unk_buf),
+                    unk_178: 0x0, // padding?
                 })?;
 
                 builder.add(microseq::Timestamp::ver {
@@ -904,7 +908,7 @@ impl file::Queue for RenderQueue::ver {
                     work_queue: self.wq_vtx.info_pointer(),
                     unk_24: U64(0),
                     #[ver(V >= V13_0B4)]
-                    ts_flag: inner_weak_ptr!(ptr, ts_flag),
+                    unk_ts: inner_weak_ptr!(ptr, unk_ts),
                     uuid: uuid_ta,
                     unk_30_padding: 0,
                 })?;
@@ -921,7 +925,7 @@ impl file::Queue for RenderQueue::ver {
                     work_queue: self.wq_vtx.info_pointer(),
                     unk_24: U64(0),
                     #[ver(V >= V13_0B4)]
-                    ts_flag: inner_weak_ptr!(ptr, ts_flag),
+                    unk_ts: inner_weak_ptr!(ptr, unk_ts),
                     uuid: uuid_ta,
                     unk_30_padding: 0,
                 })?;
@@ -947,7 +951,7 @@ impl file::Queue for RenderQueue::ver {
                     unk_60: 0x0,      // fixed
                     unk_64: 0x0,      // fixed
                     unk_68: 0x0,      // fixed
-                    #[ver(G >= G14)]
+                    #[ver(G >= G14 && V < V13_0B4)]
                     unk_68_g14: U64(0),
                     restart_branch_offset: off,
                     unk_70: 0x0, // fixed
@@ -975,7 +979,7 @@ impl file::Queue for RenderQueue::ver {
                     fw::vertex::raw::RunVertex::ver {
                         tag: fw::workqueue::CommandType::RunVertex,
                         #[ver(V >= V13_0B4)]
-                        counter: 1,
+                        counter: U64(count_vtx),
                         vm_slot: vm_bind.slot(),
                         unk_8: 0,
                         notifier: inner.notifier.gpu_pointer(),
@@ -1116,15 +1120,13 @@ impl file::Queue for RenderQueue::ver {
                         client_sequence: slot_client_seq,
                         pad_5d5: Default::default(),
                         #[ver(V >= V13_0B4)]
-                        unk_5e0: 0,
+                        unk_5d8_0: 0,
                         #[ver(V >= V13_0B4)]
-                        unk_5e4: 0,
+                        unk_5d8_4: 0,
                         #[ver(V >= V13_0B4)]
-                        ts_flag: 0,
+                        unk_ts: U64(0),
                         #[ver(V >= V13_0B4)]
-                        unk_5e6: 0,
-                        #[ver(V >= V13_0B4)]
-                        unk_5e8: Default::default(),
+                        unk_5d8_d: Default::default(),
                         pad_5d8: Default::default(),
                     }
                 ))
