@@ -110,6 +110,7 @@ pub(crate) mod raw {
         }
     }
 
+    #[versions(AGX)]
     #[derive(Debug)]
     #[repr(C)]
     pub(crate) struct QueueInfo<'a> {
@@ -146,6 +147,7 @@ trivial_gpustruct!(RingState);
 
 impl Command for Barrier {}
 
+#[versions(AGX)]
 #[derive(Debug)]
 pub(crate) struct QueueInfo {
     pub(crate) state: GpuObject<RingState>,
@@ -153,6 +155,7 @@ pub(crate) struct QueueInfo {
     pub(crate) gpu_buf: GpuArray<u8>,
 }
 
-impl GpuStruct for QueueInfo {
-    type Raw<'a> = raw::QueueInfo<'a>;
+#[versions(AGX)]
+impl GpuStruct for QueueInfo::ver {
+    type Raw<'a> = raw::QueueInfo::ver<'a>;
 }

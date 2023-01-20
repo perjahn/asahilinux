@@ -126,7 +126,7 @@ pub(crate) enum PipeType {
 #[repr(C)]
 pub(crate) struct RunWorkQueueMsg {
     pub(crate) pipe_type: PipeType,
-    pub(crate) work_queue: Option<GpuWeakPointer<super::workqueue::QueueInfo>>,
+    pub(crate) work_queue: Option<GpuWeakPointer<super::workqueue::QueueInfo::ver>>,
     pub(crate) wptr: u32,
     pub(crate) event_slot: u32,
     pub(crate) is_new: bool,
