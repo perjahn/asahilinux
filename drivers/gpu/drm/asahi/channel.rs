@@ -178,24 +178,29 @@ impl DeviceControlChannel::ver {
     }
 }
 
+#[versions(AGX)]
 pub(crate) struct PipeChannel {
     dev: AsahiDevice,
-    ch: TxChannel<ChannelState, PipeMsg>,
+    ch: TxChannel<ChannelState, PipeMsg::ver>,
 }
 
-impl PipeChannel {
-    pub(crate) fn new(dev: &AsahiDevice, alloc: &mut gpu::KernelAllocators) -> Result<PipeChannel> {
-        Ok(PipeChannel {
+#[versions(AGX)]
+impl PipeChannel::ver {
+    pub(crate) fn new(
+        dev: &AsahiDevice,
+        alloc: &mut gpu::KernelAllocators,
+    ) -> Result<PipeChannel::ver> {
+        Ok(PipeChannel::ver {
             dev: dev.clone(),
-            ch: TxChannel::<ChannelState, PipeMsg>::new(alloc, 0x100)?,
+            ch: TxChannel::<ChannelState, PipeMsg::ver>::new(alloc, 0x100)?,
         })
     }
 
-    pub(crate) fn to_raw(&self) -> raw::ChannelRing<ChannelState, PipeMsg> {
+    pub(crate) fn to_raw(&self) -> raw::ChannelRing<ChannelState, PipeMsg::ver> {
         self.ch.ring.to_raw()
     }
 
-    pub(crate) fn send(&mut self, msg: &PipeMsg) {
+    pub(crate) fn send(&mut self, msg: &PipeMsg::ver) {
         cls_dev_dbg!(PipeCh, self.dev, "Pipe: {:?}", msg);
         self.ch.put(msg);
     }

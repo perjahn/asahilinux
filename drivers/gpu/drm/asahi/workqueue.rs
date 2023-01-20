@@ -6,11 +6,11 @@
 //! Asahi GPU work queues
 
 use crate::debug::*;
-use crate::fw::channels::{PipeType, RunWorkQueueMsg};
+use crate::fw::channels::PipeType;
 use crate::fw::event::NotifierList;
 use crate::fw::types::*;
 use crate::fw::workqueue::*;
-use crate::{alloc, channel, event, gpu, object, regs};
+use crate::{alloc, channel, event, fw, gpu, object, regs};
 use crate::{box_in_place, inner_weak_ptr, place};
 use core::mem;
 use core::sync::atomic::Ordering;
@@ -407,14 +407,14 @@ impl<'a> WorkQueueBatch::ver<'a> {
         Ok(batch)
     }
 
-    pub(crate) fn submit(mut self, channel: &mut channel::PipeChannel) -> Result {
+    pub(crate) fn submit(mut self, channel: &mut channel::PipeChannel::ver) -> Result {
         if self.commands != 0 {
             return Err(EINVAL);
         }
 
         let inner = &mut self.inner;
         let event = inner.event.as_ref().expect("WorkQueueBatch lost its event");
-        let msg = RunWorkQueueMsg {
+        let msg = fw::channels::RunWorkQueueMsg::ver {
             pipe_type: inner.pipe_type,
             work_queue: Some(inner.info.weak_pointer()),
             wptr: inner.wptr,

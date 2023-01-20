@@ -121,6 +121,7 @@ pub(crate) enum PipeType {
     Compute = 2,
 }
 
+#[versions(AGX)]
 #[derive(Debug, Copy, Clone, Default)]
 #[repr(C)]
 pub(crate) struct RunWorkQueueMsg {
@@ -132,7 +133,8 @@ pub(crate) struct RunWorkQueueMsg {
     pub(crate) __pad: Pad<0x1b>,
 }
 
-pub(crate) type PipeMsg = RunWorkQueueMsg;
+#[versions(AGX)]
+pub(crate) type PipeMsg = RunWorkQueueMsg::ver;
 
 #[versions(AGX)]
 pub(crate) const DEVICECONTROL_SZ: usize = 0x2c;

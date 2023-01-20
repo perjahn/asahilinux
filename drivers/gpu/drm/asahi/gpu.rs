@@ -68,10 +68,11 @@ struct RxChannels {
     stats: channel::StatsChannel::ver,
 }
 
+#[versions(AGX)]
 struct PipeChannels {
-    pub(crate) vtx: Vec<Mutex<channel::PipeChannel>>,
-    pub(crate) frag: Vec<Mutex<channel::PipeChannel>>,
-    pub(crate) comp: Vec<Mutex<channel::PipeChannel>>,
+    pub(crate) vtx: Vec<Mutex<channel::PipeChannel::ver>>,
+    pub(crate) frag: Vec<Mutex<channel::PipeChannel::ver>>,
+    pub(crate) comp: Vec<Mutex<channel::PipeChannel::ver>>,
 }
 
 #[versions(AGX)]
@@ -130,7 +131,7 @@ pub(crate) struct GpuManager {
     rx_channels: Mutex<Box<RxChannels::ver>>,
     tx_channels: Mutex<Box<TxChannels::ver>>,
     fwctl_channel: Mutex<Box<channel::FwCtlChannel>>,
-    pipes: PipeChannels,
+    pipes: PipeChannels::ver,
     event_manager: Arc<event::EventManager>,
     buffer_mgr: buffer::BufferManager,
     ids: SequenceIDs,
@@ -313,7 +314,7 @@ impl GpuManager::ver {
             });
         }
 
-        let mut p_pipes: Vec<fw::initdata::raw::PipeChannels> = Vec::new();
+        let mut p_pipes: Vec<fw::initdata::raw::PipeChannels::ver> = Vec::new();
 
         for ((v, f), c) in mgr
             .pipes
@@ -322,7 +323,7 @@ impl GpuManager::ver {
             .zip(&mgr.pipes.frag)
             .zip(&mgr.pipes.comp)
         {
-            p_pipes.try_push(fw::initdata::raw::PipeChannels {
+            p_pipes.try_push(fw::initdata::raw::PipeChannels::ver {
                 vtx: v.lock().to_raw(),
                 frag: f.lock().to_raw(),
                 comp: c.lock().to_raw(),
@@ -386,7 +387,7 @@ impl GpuManager::ver {
         event_manager: Arc<event::EventManager>,
         initdata: Box<fw::types::GpuObject<fw::initdata::InitData::ver>>,
     ) -> Result<UniqueArc<GpuManager::ver>> {
-        let mut pipes = PipeChannels {
+        let mut pipes = PipeChannels::ver {
             vtx: Vec::new(),
             frag: Vec::new(),
             comp: Vec::new(),
@@ -395,13 +396,13 @@ impl GpuManager::ver {
         for _i in 0..=NUM_PIPES - 1 {
             pipes
                 .vtx
-                .try_push(Mutex::new(channel::PipeChannel::new(dev, &mut alloc)?))?;
+                .try_push(Mutex::new(channel::PipeChannel::ver::new(dev, &mut alloc)?))?;
             pipes
                 .frag
-                .try_push(Mutex::new(channel::PipeChannel::new(dev, &mut alloc)?))?;
+                .try_push(Mutex::new(channel::PipeChannel::ver::new(dev, &mut alloc)?))?;
             pipes
                 .comp
-                .try_push(Mutex::new(channel::PipeChannel::new(dev, &mut alloc)?))?;
+                .try_push(Mutex::new(channel::PipeChannel::ver::new(dev, &mut alloc)?))?;
         }
 
         UniqueArc::try_new(GpuManager::ver {
