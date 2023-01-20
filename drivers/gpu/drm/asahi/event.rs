@@ -97,7 +97,7 @@ impl slotalloc::SlotItem for EventInner {
 pub(crate) struct EventManagerInner {
     stamps: GpuArray<Stamp>,
     fw_stamps: GpuArray<FwStamp>,
-    owners: Vec<Option<Arc<workqueue::WorkQueue>>>,
+    owners: Vec<Option<Arc<dyn workqueue::WorkQueue>>>,
 }
 
 pub(crate) struct EventManager {
@@ -133,7 +133,7 @@ impl EventManager {
     pub(crate) fn get(
         &self,
         token: Option<Token>,
-        owner: Arc<workqueue::WorkQueue>,
+        owner: Arc<dyn workqueue::WorkQueue>,
     ) -> Result<Event> {
         let ev = self.alloc.get_inner(token, |inner, ev| {
             mod_pr_debug!(

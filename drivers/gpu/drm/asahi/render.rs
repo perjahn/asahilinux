@@ -32,8 +32,8 @@ pub(crate) struct RenderQueue {
     dev: AsahiDevice,
     vm: mmu::Vm,
     ualloc: Arc<Mutex<alloc::DefaultAllocator>>,
-    wq_vtx: Arc<workqueue::WorkQueue>,
-    wq_frag: Arc<workqueue::WorkQueue>,
+    wq_vtx: Arc<workqueue::WorkQueue::ver>,
+    wq_frag: Arc<workqueue::WorkQueue::ver>,
     buffer: buffer::Buffer::ver,
     gpu_context: GpuObject<fw::workqueue::GpuContextData>,
     notifier_list: GpuObject<fw::event::NotifierList>,
@@ -108,7 +108,7 @@ impl RenderQueue::ver {
             dev: dev.clone(),
             vm,
             ualloc,
-            wq_vtx: workqueue::WorkQueue::new(
+            wq_vtx: workqueue::WorkQueue::ver::new(
                 alloc,
                 event_manager.clone(),
                 gpu_context.weak_pointer(),
@@ -117,7 +117,7 @@ impl RenderQueue::ver {
                 id,
                 priority,
             )?,
-            wq_frag: workqueue::WorkQueue::new(
+            wq_frag: workqueue::WorkQueue::ver::new(
                 alloc,
                 event_manager,
                 gpu_context.weak_pointer(),
@@ -371,8 +371,9 @@ impl file::Queue for RenderQueue::ver {
             vm_bind.slot()
         );
 
-        let mut batches_vtx = workqueue::WorkQueue::begin_batch(&self.wq_vtx, vm_bind.slot())?;
-        let mut batches_frag = workqueue::WorkQueue::begin_batch(&self.wq_frag, vm_bind.slot())?;
+        let mut batches_vtx = workqueue::WorkQueue::ver::begin_batch(&self.wq_vtx, vm_bind.slot())?;
+        let mut batches_frag =
+            workqueue::WorkQueue::ver::begin_batch(&self.wq_frag, vm_bind.slot())?;
 
         let scene = Arc::try_new(self.buffer.new_scene(kalloc, &tile_info)?)?;
 

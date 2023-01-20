@@ -30,7 +30,7 @@ pub(crate) struct ComputeQueue {
     dev: AsahiDevice,
     vm: mmu::Vm,
     ualloc: Arc<Mutex<alloc::DefaultAllocator>>,
-    wq: Arc<workqueue::WorkQueue>,
+    wq: Arc<workqueue::WorkQueue::ver>,
     gpu_context: GpuObject<fw::workqueue::GpuContextData>,
     notifier_list: GpuObject<fw::event::NotifierList>,
     notifier: Arc<GpuObject<fw::event::Notifier::ver>>,
@@ -96,7 +96,7 @@ impl ComputeQueue::ver {
             dev: dev.clone(),
             vm,
             ualloc,
-            wq: workqueue::WorkQueue::new(
+            wq: workqueue::WorkQueue::ver::new(
                 alloc,
                 event_manager,
                 gpu_context.weak_pointer(),
@@ -166,7 +166,7 @@ impl file::Queue for ComputeQueue::ver {
             vm_bind.slot()
         );
 
-        let mut batches = workqueue::WorkQueue::begin_batch(&self.wq, vm_bind.slot())?;
+        let mut batches = workqueue::WorkQueue::ver::begin_batch(&self.wq, vm_bind.slot())?;
 
         // TODO: Is this the same on all GPUs? Is this really for preemption?
         let preempt_size = 0x7fa0;
