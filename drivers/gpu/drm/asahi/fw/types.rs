@@ -36,7 +36,7 @@ pub(crate) struct Stamp(pub(crate) AtomicU32);
 pub(crate) struct FwStamp(pub(crate) AtomicU32);
 
 #[derive(Copy, Clone, Default)]
-#[repr(C, packed(4))]
+#[repr(C, packed(1))]
 pub(crate) struct U64(pub(crate) u64);
 
 unsafe impl Zeroed for U64 {}
