@@ -839,7 +839,8 @@ pub(crate) mod raw {
     pub(crate) struct RuntimePointers<'a> {
         pub(crate) pipes: Array<4, PipeChannels>,
 
-        pub(crate) device_control: ChannelRing<channels::ChannelState, channels::DeviceControlMsg>,
+        pub(crate) device_control:
+            ChannelRing<channels::ChannelState, channels::DeviceControlMsg::ver>,
         pub(crate) event: ChannelRing<channels::ChannelState, channels::RawEventMsg>,
         pub(crate) fw_log: ChannelRing<channels::FwLogChannelState, channels::RawFwLogMsg>,
         pub(crate) ktrace: ChannelRing<channels::ChannelState, channels::RawKTraceMsg>,
