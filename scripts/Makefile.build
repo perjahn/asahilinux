@@ -281,6 +281,7 @@ rust_allowed_features := allocator_api,const_refs_to_cell,new_uninit
 
 rust_common_cmd = \
 	RUST_MODFILE=$(modfile) $(RUSTC_OR_CLIPPY) $(rust_flags) \
+	$(if $(RUST_INCREMENTAL),-Cincremental=$(obj)/rust_incremental,) \
 	-Zallow-features=$(rust_allowed_features) \
 	-Zcrate-attr=no_std \
 	-Zcrate-attr='feature($(rust_allowed_features))' \
@@ -307,6 +308,15 @@ quiet_cmd_rustc_o_rs = $(RUSTC_OR_CLIPPY_QUIET) $(quiet_modtag) $@
 
 $(obj)/%.o: $(src)/%.rs FORCE
 	$(call if_changed_dep,rustc_o_rs)
+
+quiet_cmd_rustc_a_rs = $(RUSTC_OR_CLIPPY_QUIET) $(quiet_modtag) $@
+      cmd_rustc_a_rs = \
+	$(rust_common_cmd) --emit=dep-info,link -Ccodegen-units=32 $<; \
+	mv $(dir $@)/$(patsubst %.a,lib%.rlib,$(notdir $@)) $@; \
+	$(rust_handle_depfile)
+
+$(obj)/%.a: $(src)/%.rs FORCE
+	$(call if_changed_dep,rustc_a_rs)
 
 quiet_cmd_rustc_rsi_rs = $(RUSTC_OR_CLIPPY_QUIET) $(quiet_modtag) $@
       cmd_rustc_rsi_rs = \

@@ -131,6 +131,13 @@ endif
 
 export KBUILD_CHECKSRC
 
+# Enable Rust incremental compilation.
+#
+# Use 'make RUST_INCREMENTAL=1' to enable it.
+ifeq ("$(origin RUST_INCREMENTAL)", "command line")
+  KBUILD_RUST_INCREMENTAL := $(RUST_INCREMENTAL)
+endif
+
 # Enable "clippy" (a linter) as part of the Rust compilation.
 #
 # Use 'make CLIPPY=1' to enable it.
