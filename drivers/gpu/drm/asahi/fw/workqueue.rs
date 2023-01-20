@@ -136,8 +136,12 @@ pub(crate) mod raw {
         pub(crate) unk_94: u32,
         pub(crate) pending: AtomicU32,
         pub(crate) unk_9c: u32,
+        #[ver(V >= V13_2)]
+        pub(crate) unk_a0_0: u32,
         pub(crate) gpu_context: GpuWeakPointer<super::GpuContextData>,
         pub(crate) unk_a8: U64,
+        #[ver(V >= V13_2)]
+        pub(crate) unk_b0: u32,
     }
 }
 

@@ -503,6 +503,9 @@ impl<'a> InitDataBuilder::ver<'a> {
                     raw::Globals::ver {
                         //ktrace_enable: 0xffffffff,
                         ktrace_enable: 0,
+                        #[ver(V >= V13_2)]
+                        unk_24_0: 3000,
+                        unk_24: 0,
                         #[ver(V >= V13_0B4)]
                         unk_28_0: 0, // debug
                         unk_28: 1,

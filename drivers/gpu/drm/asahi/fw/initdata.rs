@@ -472,6 +472,9 @@ pub(crate) mod raw {
 
         pub(crate) unk_dd0: Array<0x40, u8>,
 
+        #[ver(V >= V13_2)]
+        pub(crate) unk_e10_pad: Array<0x10, u8>,
+
         #[ver(V >= V13_0B4)]
         pub(crate) unk_e10_0: HwDataA130Extra,
 
@@ -922,7 +925,12 @@ pub(crate) mod raw {
     #[repr(C)]
     pub(crate) struct Globals {
         pub(crate) ktrace_enable: u32,
-        pub(crate) unk_4: Array<0x24, u8>,
+        pub(crate) unk_4: Array<0x20, u8>,
+
+        #[ver(V >= V13_2)]
+        pub(crate) unk_24_0: u32,
+
+        pub(crate) unk_24: u32,
 
         #[ver(V >= V13_0B4)]
         pub(crate) unk_28_0: u32,
@@ -943,7 +951,7 @@ pub(crate) mod raw {
         pub(crate) unk_1000: Array<0x7000, u8>,
         pub(crate) unk_8000: Array<0x900, u8>,
 
-        #[ver(V >= V13_0B4)]
+        #[ver(V >= V13_0B4 && V < V13_2)]
         pub(crate) unk_8900_0: u32,
 
         pub(crate) unk_8900: u32,
