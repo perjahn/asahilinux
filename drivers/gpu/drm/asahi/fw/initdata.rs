@@ -17,12 +17,13 @@ pub(crate) mod raw {
         pub(crate) ring: Option<GpuWeakPointer<[U]>>,
     }
 
+    #[versions(AGX)]
     #[derive(Debug, Default)]
     #[repr(C)]
     pub(crate) struct PipeChannels {
-        pub(crate) vtx: ChannelRing<channels::ChannelState, channels::PipeMsg>,
-        pub(crate) frag: ChannelRing<channels::ChannelState, channels::PipeMsg>,
-        pub(crate) comp: ChannelRing<channels::ChannelState, channels::PipeMsg>,
+        pub(crate) vtx: ChannelRing<channels::ChannelState, channels::PipeMsg::ver>,
+        pub(crate) frag: ChannelRing<channels::ChannelState, channels::PipeMsg::ver>,
+        pub(crate) comp: ChannelRing<channels::ChannelState, channels::PipeMsg::ver>,
     }
 
     #[derive(Debug, Default)]
@@ -837,7 +838,7 @@ pub(crate) mod raw {
     #[versions(AGX)]
     #[repr(C)]
     pub(crate) struct RuntimePointers<'a> {
-        pub(crate) pipes: Array<4, PipeChannels>,
+        pub(crate) pipes: Array<4, PipeChannels::ver>,
 
         pub(crate) device_control:
             ChannelRing<channels::ChannelState, channels::DeviceControlMsg::ver>,
