@@ -19,7 +19,7 @@ use crate::alloc::Allocator;
 use crate::box_in_place;
 use crate::debug::*;
 use crate::driver::AsahiDevice;
-use crate::fw::channels::{DeviceControlMsg, FwCtlMsg, PipeType};
+use crate::fw::channels::PipeType;
 use crate::{
     alloc, buffer, channel, compute, event, file, fw, gem, hw, initdata, mem, mmu, regs, render,
     workqueue,
@@ -74,8 +74,9 @@ struct PipeChannels {
     pub(crate) comp: Vec<Mutex<channel::PipeChannel>>,
 }
 
+#[versions(AGX)]
 struct TxChannels {
-    pub(crate) device_control: channel::DeviceControlChannel,
+    pub(crate) device_control: channel::DeviceControlChannel::ver,
 }
 
 const NUM_PIPES: usize = 4;
@@ -127,7 +128,7 @@ pub(crate) struct GpuManager {
     io_mappings: Vec<mmu::Mapping>,
     rtkit: Mutex<Option<Box<rtkit::RTKit<GpuManager::ver>>>>,
     rx_channels: Mutex<Box<RxChannels::ver>>,
-    tx_channels: Mutex<Box<TxChannels>>,
+    tx_channels: Mutex<Box<TxChannels::ver>>,
     fwctl_channel: Mutex<Box<channel::FwCtlChannel>>,
     pipes: PipeChannels,
     event_manager: Arc<event::EventManager>,
@@ -166,7 +167,7 @@ pub(crate) trait GpuManager: Send + Sync {
     fn handle_timeout(&self, counter: u32, event_slot: u32);
     fn handle_fault(&self);
     fn wait_for_poweroff(&self, timeout: usize) -> Result;
-    fn fwctl(&self, msg: FwCtlMsg) -> Result;
+    fn fwctl(&self, msg: fw::channels::FwCtlMsg) -> Result;
     fn get_cfg(&self) -> &'static hw::HwConfig;
     fn get_dyncfg(&self) -> &hw::DynConfig;
     fn start_op(&self) -> Result<OpGuard<'_>>;
@@ -419,8 +420,8 @@ impl GpuManager::ver {
                 ktrace: channel::KTraceChannel::new(dev, &mut alloc)?,
                 stats: channel::StatsChannel::ver::new(dev, &mut alloc)?,
             })?),
-            tx_channels: Mutex::new(Box::try_new(TxChannels {
-                device_control: channel::DeviceControlChannel::new(dev, &mut alloc)?,
+            tx_channels: Mutex::new(Box::try_new(TxChannels::ver {
+                device_control: channel::DeviceControlChannel::ver::new(dev, &mut alloc)?,
             })?),
             fwctl_channel: Mutex::new(Box::try_new(channel::FwCtlChannel::new(dev, &mut alloc)?)?),
             pipes,
@@ -648,10 +649,9 @@ impl GpuManager for GpuManager::ver {
     }
 
     fn init(&self) -> Result {
-        self.tx_channels
-            .lock()
-            .device_control
-            .send(&DeviceControlMsg::Initialize(Default::default()));
+        self.tx_channels.lock().device_control.send(
+            &fw::channels::DeviceControlMsg::ver::Initialize(Default::default()),
+        );
 
         let initdata = self.initdata.gpu_va().get();
         let mut guard = self.rtkit.lock();
@@ -794,20 +794,22 @@ impl GpuManager for GpuManager::ver {
         let mut guard = self.alloc.lock();
         let (garbage_count, _) = guard.private.garbage();
 
-        let dc = context.with(|raw, _inner| DeviceControlMsg::DestroyContext {
-            unk_4: 0,
-            ctx_23: raw.unk_23,
-            __pad0: Default::default(),
-            unk_c: 0,
-            unk_10: 0,
-            ctx_0: raw.unk_0,
-            ctx_1: raw.unk_1,
-            ctx_4: raw.unk_4,
-            __pad1: Default::default(),
-            unk_18: 0,
-            gpu_context: Some(context.weak_pointer()),
-            __pad2: Default::default(),
-        });
+        let dc = context.with(
+            |raw, _inner| fw::channels::DeviceControlMsg::ver::DestroyContext {
+                unk_4: 0,
+                ctx_23: raw.unk_23,
+                __pad0: Default::default(),
+                unk_c: 0,
+                unk_10: 0,
+                ctx_0: raw.unk_0,
+                ctx_1: raw.unk_1,
+                ctx_4: raw.unk_4,
+                __pad1: Default::default(),
+                unk_18: 0,
+                gpu_context: Some(context.weak_pointer()),
+                __pad2: Default::default(),
+            },
+        );
 
         mod_dev_dbg!(self.dev, "Context invalidation command: {:?}\n", &dc);
 
@@ -842,7 +844,7 @@ impl GpuManager for GpuManager::ver {
         // but this command does a full cache flush too, so abuse it
         // for that.
 
-        let dc = DeviceControlMsg::DestroyContext {
+        let dc = fw::channels::DeviceControlMsg::ver::DestroyContext {
             unk_4: 0,
             ctx_23: 0,
             __pad0: Default::default(),

@@ -144,29 +144,31 @@ where
     }
 }
 
+#[versions(AGX)]
 pub(crate) struct DeviceControlChannel {
     dev: AsahiDevice,
-    ch: TxChannel<ChannelState, DeviceControlMsg>,
+    ch: TxChannel<ChannelState, DeviceControlMsg::ver>,
 }
 
-impl DeviceControlChannel {
+#[versions(AGX)]
+impl DeviceControlChannel::ver {
     const COMMAND_TIMEOUT_MS: u64 = 100;
 
     pub(crate) fn new(
         dev: &AsahiDevice,
         alloc: &mut gpu::KernelAllocators,
-    ) -> Result<DeviceControlChannel> {
-        Ok(DeviceControlChannel {
+    ) -> Result<DeviceControlChannel::ver> {
+        Ok(DeviceControlChannel::ver {
             dev: dev.clone(),
-            ch: TxChannel::<ChannelState, DeviceControlMsg>::new(alloc, 0x100)?,
+            ch: TxChannel::<ChannelState, DeviceControlMsg::ver>::new(alloc, 0x100)?,
         })
     }
 
-    pub(crate) fn to_raw(&self) -> raw::ChannelRing<ChannelState, DeviceControlMsg> {
+    pub(crate) fn to_raw(&self) -> raw::ChannelRing<ChannelState, DeviceControlMsg::ver> {
         self.ch.ring.to_raw()
     }
 
-    pub(crate) fn send(&mut self, msg: &DeviceControlMsg) -> u32 {
+    pub(crate) fn send(&mut self, msg: &DeviceControlMsg::ver) -> u32 {
         cls_dev_dbg!(DeviceControlCh, self.dev, "DeviceControl: {:?}", msg);
         self.ch.put(msg)
     }

@@ -134,37 +134,39 @@ pub(crate) struct RunWorkQueueMsg {
 
 pub(crate) type PipeMsg = RunWorkQueueMsg;
 
+#[versions(AGX)]
 pub(crate) const DEVICECONTROL_SZ: usize = 0x2c;
 
 // TODO: clean up when arbitrary_enum_discriminant is stable
 // https://github.com/rust-lang/rust/issues/60553
 
+#[versions(AGX)]
 #[derive(Debug, Copy, Clone)]
 #[repr(C, u32)]
 pub(crate) enum DeviceControlMsg {
-    Unk00(Array<DEVICECONTROL_SZ, u8>),
-    Unk01(Array<DEVICECONTROL_SZ, u8>),
-    Unk02(Array<DEVICECONTROL_SZ, u8>),
-    Unk03(Array<DEVICECONTROL_SZ, u8>),
-    Unk04(Array<DEVICECONTROL_SZ, u8>),
-    Unk05(Array<DEVICECONTROL_SZ, u8>),
-    Unk06(Array<DEVICECONTROL_SZ, u8>),
-    Unk07(Array<DEVICECONTROL_SZ, u8>),
-    Unk08(Array<DEVICECONTROL_SZ, u8>),
-    Unk09(Array<DEVICECONTROL_SZ, u8>),
-    Unk0a(Array<DEVICECONTROL_SZ, u8>),
-    Unk0b(Array<DEVICECONTROL_SZ, u8>),
-    Unk0c(Array<DEVICECONTROL_SZ, u8>),
-    Unk0d(Array<DEVICECONTROL_SZ, u8>),
-    Unk0e(Array<DEVICECONTROL_SZ, u8>),
-    Unk0f(Array<DEVICECONTROL_SZ, u8>),
-    Unk10(Array<DEVICECONTROL_SZ, u8>),
-    Unk11(Array<DEVICECONTROL_SZ, u8>),
-    Unk12(Array<DEVICECONTROL_SZ, u8>),
-    Unk13(Array<DEVICECONTROL_SZ, u8>),
-    Unk14(Array<DEVICECONTROL_SZ, u8>),
-    Unk15(Array<DEVICECONTROL_SZ, u8>),
-    Unk16(Array<DEVICECONTROL_SZ, u8>),
+    Unk00(Array<DEVICECONTROL_SZ::ver, u8>),
+    Unk01(Array<DEVICECONTROL_SZ::ver, u8>),
+    Unk02(Array<DEVICECONTROL_SZ::ver, u8>),
+    Unk03(Array<DEVICECONTROL_SZ::ver, u8>),
+    Unk04(Array<DEVICECONTROL_SZ::ver, u8>),
+    Unk05(Array<DEVICECONTROL_SZ::ver, u8>),
+    Unk06(Array<DEVICECONTROL_SZ::ver, u8>),
+    Unk07(Array<DEVICECONTROL_SZ::ver, u8>),
+    Unk08(Array<DEVICECONTROL_SZ::ver, u8>),
+    Unk09(Array<DEVICECONTROL_SZ::ver, u8>),
+    Unk0a(Array<DEVICECONTROL_SZ::ver, u8>),
+    Unk0b(Array<DEVICECONTROL_SZ::ver, u8>),
+    Unk0c(Array<DEVICECONTROL_SZ::ver, u8>),
+    Unk0d(Array<DEVICECONTROL_SZ::ver, u8>),
+    Unk0e(Array<DEVICECONTROL_SZ::ver, u8>),
+    Unk0f(Array<DEVICECONTROL_SZ::ver, u8>),
+    Unk10(Array<DEVICECONTROL_SZ::ver, u8>),
+    Unk11(Array<DEVICECONTROL_SZ::ver, u8>),
+    Unk12(Array<DEVICECONTROL_SZ::ver, u8>),
+    Unk13(Array<DEVICECONTROL_SZ::ver, u8>),
+    Unk14(Array<DEVICECONTROL_SZ::ver, u8>),
+    Unk15(Array<DEVICECONTROL_SZ::ver, u8>),
+    Unk16(Array<DEVICECONTROL_SZ::ver, u8>),
     DestroyContext {
         unk_4: u32,
         ctx_23: u8,
@@ -177,12 +179,14 @@ pub(crate) enum DeviceControlMsg {
         __pad1: Pad<1>,
         unk_18: u32,
         gpu_context: Option<GpuWeakPointer<super::workqueue::GpuContextData>>,
-        __pad2: Pad<0xc>,
+        __pad2: Pad<{ DEVICECONTROL_SZ::ver - 0x20 }>,
     },
-    Unk18(Array<DEVICECONTROL_SZ, u8>),
-    Initialize(Pad<DEVICECONTROL_SZ>),
+    Unk18(Array<DEVICECONTROL_SZ::ver, u8>),
+    Initialize(Pad<DEVICECONTROL_SZ::ver>),
 }
-default_zeroed!(DeviceControlMsg);
+
+#[versions(AGX)]
+default_zeroed!(DeviceControlMsg::ver);
 
 #[derive(Copy, Clone, Default, Debug)]
 pub(crate) struct FwCtlMsg {
