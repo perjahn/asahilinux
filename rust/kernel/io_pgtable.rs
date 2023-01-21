@@ -123,19 +123,6 @@ impl<T: FlushOps, U: GetConfig<T>> IOPagetable<T, U> {
         <U as GetConfig<T>>::cfg(self)
     }
 
-    pub fn map(&mut self, iova: usize, paddr: usize, size: usize, prot: u32) -> Result {
-        to_result(unsafe {
-            (*self.ops).map.unwrap()(
-                self.ops,
-                iova as u64,
-                paddr as u64,
-                size,
-                prot as i32,
-                bindings::GFP_KERNEL,
-            )
-        })
-    }
-
     pub fn map_pages(
         &mut self,
         iova: usize,
@@ -160,15 +147,6 @@ impl<T: FlushOps, U: GetConfig<T>> IOPagetable<T, U> {
         })?;
 
         Ok(mapped)
-    }
-
-    pub fn unmap(
-        &mut self,
-        iova: usize,
-        size: usize,
-        // TODO: gather: *mut iommu_iotlb_gather,
-    ) -> usize {
-        unsafe { (*self.ops).unmap.unwrap()(self.ops, iova as u64, size, core::ptr::null_mut()) }
     }
 
     pub fn unmap_pages(
