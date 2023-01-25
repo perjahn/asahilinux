@@ -184,14 +184,16 @@ impl Node {
         }
     }
 
-    pub fn is_compatible(&self, compatible: &CStr) -> Option<u32> {
+    /// Checks whether the node is compatible with the given compatible string.
+    ///
+    /// Returns `None` if there is no match, or `Some<NonZeroU32>` if there is, with the value
+    /// representing as match score (higher values for more specific compatible matches).
+    pub fn is_compatible(&self, compatible: &CStr) -> Option<NonZeroU32> {
+        // SAFETY: `raw_node` is valid per the type invariant.
         let ret =
             unsafe { bindings::of_device_is_compatible(self.raw_node, compatible.as_char_ptr()) };
 
-        match ret {
-            0 => None,
-            a => Some(a as u32),
-        }
+        NonZeroU32::new(ret.try_into().ok()?)
     }
 
     pub fn parse_phandle(&self, name: &CStr, index: usize) -> Option<Node> {
