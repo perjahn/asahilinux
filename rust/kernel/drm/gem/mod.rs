@@ -28,6 +28,7 @@ pub trait BaseDriverObject<T: BaseObject>: Sync + Send + Sized {
         Ok(())
     }
 
+    /// Close a handle to an existing object, associated with a File.
     fn close(
         _obj: &<<T as IntoGEMObject>::Driver as drv::Driver>::Object,
         _file: &file::File<<<T as IntoGEMObject>::Driver as drv::Driver>::File>,
