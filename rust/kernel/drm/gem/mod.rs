@@ -363,15 +363,6 @@ impl<T: IntoGEMObject> DerefMut for UniqueObjectRef<T> {
     }
 }
 
-impl<T: IntoGEMObject> UniqueObjectRef<T> {
-    pub fn into_ref(self) -> ObjectRef<T> {
-        let ptr = self.ptr as *const _;
-        core::mem::forget(self);
-
-        ObjectRef { ptr }
-    }
-}
-
 pub(super) fn create_fops() -> bindings::file_operations {
     bindings::file_operations {
         owner: core::ptr::null_mut(),
