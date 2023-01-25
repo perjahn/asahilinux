@@ -1,13 +1,17 @@
 // SPDX-License-Identifier: GPL-2.0-only OR MIT
-#![allow(missing_docs)]
-#![allow(unused_imports)]
-#![allow(dead_code)]
 
-//! Apple AGX UAT (MMU) support
+//! GPU UAT (MMU) management
+//!
+//! AGX GPUs use an MMU called the UAT, which is largely compatible with the ARM64 page table
+//! format. This module manages the global MMU structures, including a shared handoff structure
+//! that is used to coordinate VM management operations with the firmware, the TTBAT which points
+//! to currently active GPU VM contexts, as well as the individual `Vm` operations to map and
+//! unmap buffer objects into a single user or kernel address space.
+//!
+//! The actual page table management is delegated to the common kernel `io_pgtable` code.
 
 use core::fmt::Debug;
-use core::mem::{size_of, ManuallyDrop};
-use core::ops::Deref;
+use core::mem::size_of;
 use core::ptr::{addr_of_mut, NonNull};
 use core::sync::atomic::{fence, AtomicU32, AtomicU64, AtomicU8, Ordering};
 use core::time::Duration;
@@ -17,9 +21,8 @@ use kernel::{
     drm::mm,
     error::{to_result, Result},
     io_pgtable,
-    io_pgtable::{prot, AppleUAT, AppleUATCfg, IOPagetable},
+    io_pgtable::{prot, AppleUAT},
     prelude::*,
-    str::CString,
     sync::{smutex::Mutex, Guard},
     sync::{Arc, UniqueArc},
     time, PointerWrapper,
@@ -31,26 +34,42 @@ use crate::{driver, fw, gem, hw, mem, slotalloc};
 
 const DEBUG_CLASS: DebugFlags = DebugFlags::Mmu;
 
+/// PPL magic number for the handoff region
 const PPL_MAGIC: u64 = 0x4b1d000000000002;
 
+/// Number of supported context entries in the TTBAT
 const UAT_NUM_CTX: usize = 64;
+/// First context available for users
 const UAT_USER_CTX_START: usize = 1;
+/// Number of available user contexts
 const UAT_USER_CTX: usize = UAT_NUM_CTX - UAT_USER_CTX_START;
 
+/// Number of bits in a page offset.
 pub(crate) const UAT_PGBIT: usize = 14;
+/// UAT page size.
 pub(crate) const UAT_PGSZ: usize = 1 << UAT_PGBIT;
+/// UAT page offset mask.
 pub(crate) const UAT_PGMSK: usize = UAT_PGSZ - 1;
 
 type Pte = AtomicU64;
+
+/// Number of PTEs per page.
 const UAT_NPTE: usize = UAT_PGSZ / size_of::<Pte>();
 
+/// UAT input address space (user)
 pub(crate) const UAT_IAS: usize = 39;
+/// "Fake" kernel UAT input address space (one page level lower)
 pub(crate) const UAT_IAS_KERN: usize = 36;
 
+/// Lower/user base VA
 const IOVA_USER_BASE: usize = UAT_PGSZ;
+/// Lower/user top VA
 const IOVA_USER_TOP: usize = (1 << UAT_IAS) - 1;
-const IOVA_TTBR1_BASE: usize = 0xffffff8000000000;
+/// Upper/kernel base VA
+// const IOVA_TTBR1_BASE: usize = 0xffffff8000000000;
+/// Driver-managed kernel base VA
 const IOVA_KERN_BASE: usize = 0xffffffa000000000;
+/// Driver-managed kernel top VA
 const IOVA_KERN_TOP: usize = 0xffffffafffffffff;
 
 const TTBR_VALID: u64 = 0x1; // BIT(0)
@@ -58,33 +77,53 @@ const TTBR_ASID_SHIFT: usize = 48;
 
 const PTE_TABLE: u64 = 0x3; // BIT(0) | BIT(1)
 
+// Mapping protection types
+
 // Note: prot::CACHE means "cache coherency", which for UAT means *uncached*,
 // since uncached mappings from the GFX ASC side are cache coherent with the AP cache.
 // Not having that flag means *cached noncoherent*.
 
+/// Firmware MMIO R/W
 pub(crate) const PROT_FW_MMIO_RW: u32 =
     prot::PRIV | prot::READ | prot::WRITE | prot::CACHE | prot::MMIO;
+/// Firmware MMIO R/O
 pub(crate) const PROT_FW_MMIO_RO: u32 = prot::PRIV | prot::READ | prot::CACHE | prot::MMIO;
+/// Firmware shared (uncached) RW
 pub(crate) const PROT_FW_SHARED_RW: u32 = prot::PRIV | prot::READ | prot::WRITE | prot::CACHE;
+/// Firmware shared (uncached) RO
 pub(crate) const PROT_FW_SHARED_RO: u32 = prot::PRIV | prot::READ | prot::CACHE;
+/// Firmware private (cached) RW
 pub(crate) const PROT_FW_PRIV_RW: u32 = prot::PRIV | prot::READ | prot::WRITE;
+/*
+/// Firmware private (cached) RO
 pub(crate) const PROT_FW_PRIV_RO: u32 = prot::PRIV | prot::READ;
+*/
+/// Firmware/GPU shared (uncached) RW
 pub(crate) const PROT_GPU_FW_SHARED_RW: u32 = prot::READ | prot::WRITE | prot::CACHE;
+/// Firmware/GPU shared (private) RW
 pub(crate) const PROT_GPU_FW_PRIV_RW: u32 = prot::READ | prot::WRITE;
+/// GPU shared/coherent RW
 pub(crate) const PROT_GPU_SHARED_RW: u32 = prot::READ | prot::WRITE | prot::CACHE | prot::NOEXEC;
+/// GPU shared/coherent RO
 pub(crate) const PROT_GPU_SHARED_RO: u32 = prot::READ | prot::CACHE | prot::NOEXEC;
+/// GPU shared/coherent WO
 pub(crate) const PROT_GPU_SHARED_WO: u32 = prot::WRITE | prot::CACHE | prot::NOEXEC;
+/*
+/// GPU private/noncoherent RW
 pub(crate) const PROT_GPU_PRIV_RW: u32 = prot::READ | prot::WRITE | prot::NOEXEC;
+/// GPU private/noncoherent RO
 pub(crate) const PROT_GPU_PRIV_RO: u32 = prot::READ | prot::NOEXEC;
+*/
 
 type PhysAddr = bindings::phys_addr_t;
 
+/// A pre-allocated memory region for UAT management
 struct UatRegion {
     base: PhysAddr,
-    size: usize,
     map: NonNull<core::ffi::c_void>,
 }
 
+/// Handoff region flush info structure
 #[repr(C)]
 struct FlushInfo {
     state: AtomicU64,
@@ -92,6 +131,7 @@ struct FlushInfo {
     size: AtomicU64,
 }
 
+/// UAT Handoff region layout
 #[repr(C)]
 struct Handoff {
     magic_ap: AtomicU64,
@@ -112,6 +152,7 @@ struct Handoff {
 
 const HANDOFF_SIZE: usize = size_of::<Handoff>();
 
+/// One VM slot in the TTBAT
 #[repr(C)]
 struct SlotTTBS {
     ttb0: AtomicU64,
@@ -123,6 +164,7 @@ const SLOTS_SIZE: usize = UAT_NUM_CTX * size_of::<SlotTTBS>();
 // We need at least page 0 (ttb0)
 const PAGETABLES_SIZE: usize = UAT_PGSZ;
 
+/// Inner data for a Vm instance. This is reference-counted by the outer Vm object.
 struct VmInner {
     dev: driver::AsahiDevice,
     is_kernel: bool,
@@ -135,10 +177,10 @@ struct VmInner {
     binding: Option<slotalloc::Guard<SlotInner>>,
     bind_token: Option<slotalloc::SlotToken>,
     id: u64,
-    file_id: u64,
 }
 
 impl VmInner {
+    /// Returns the slot index, if this VM is bound.
     fn slot(&self) -> Option<u32> {
         if self.is_kernel {
             // The GFX ASC does not care about the ASID. Pick an arbitrary one.
@@ -158,10 +200,12 @@ impl VmInner {
         }
     }
 
+    /// Returns the translation table base for this Vm
     fn ttb(&self) -> u64 {
         self.page_table.cfg().ttbr
     }
 
+    /// Map an IOVA to the shifted address the underlying io_pgtable uses.
     fn map_iova(&self, iova: usize, size: usize) -> Result<usize> {
         if iova < self.min_va || (iova + size - 1) > self.max_va {
             Err(EINVAL)
@@ -172,6 +216,7 @@ impl VmInner {
         }
     }
 
+    /// Map a contiguous range of virtual->physical pages.
     fn map_pages(
         &mut self,
         mut iova: usize,
@@ -195,6 +240,7 @@ impl VmInner {
         Ok(pgcount * pgsize)
     }
 
+    /// Unmap a contiguous range of pages.
     fn unmap_pages(&mut self, mut iova: usize, pgsize: usize, pgcount: usize) -> Result<usize> {
         let mut left = pgcount;
         while left > 0 {
@@ -209,6 +255,7 @@ impl VmInner {
         Ok(pgcount * pgsize)
     }
 
+    /// Map an `mm::Node` representing an mapping in VA space.
     fn map_node(&mut self, node: &mm::Node<(), MappingInner>, prot: u32) -> Result {
         let mut iova = node.start() as usize;
         let sgt = node.sgt.as_ref().ok_or(EINVAL)?;
@@ -238,6 +285,7 @@ impl VmInner {
     }
 }
 
+/// Shared reference to a virtual memory address space ([`Vm`]).
 #[derive(Clone)]
 pub(crate) struct Vm {
     id: u64,
@@ -246,16 +294,21 @@ pub(crate) struct Vm {
 }
 no_debug!(Vm);
 
+/// Slot data for a [`Vm`] slot (nothing, we only care about the indices).
 pub(crate) struct SlotInner();
 
 impl slotalloc::SlotItem for SlotInner {
     type Data = ();
 }
 
+/// Represents a single user of a binding of a [`Vm`] to a slot.
+///
+/// The number of users is counted, and the slot will be freed when it drops to 0.
 #[derive(Debug)]
 pub(crate) struct VmBind(Vm, u32);
 
 impl VmBind {
+    /// Returns the slot that this `Vm` is bound to.
     pub(crate) fn slot(&self) -> u32 {
         self.1
     }
@@ -282,6 +335,7 @@ impl Clone for VmBind {
     }
 }
 
+/// Inner data required for an object mapping into a [`Vm`].
 pub(crate) struct MappingInner {
     owner: Arc<Mutex<VmInner>>,
     uat_inner: Arc<UatInner>,
@@ -290,17 +344,22 @@ pub(crate) struct MappingInner {
     sgt: Option<gem::SGTable>,
 }
 
+/// An object mapping into a [`Vm`], which reserves the address range from use by other mappings.
 pub(crate) struct Mapping(mm::Node<(), MappingInner>);
 
 impl Mapping {
+    /// Returns the IOVA base of this mapping
     pub(crate) fn iova(&self) -> usize {
         self.0.start() as usize
     }
 
+    /// Returns the size of this mapping in bytes
     pub(crate) fn size(&self) -> usize {
         self.0.mapped_size
     }
 
+    /// Remap a cached mapping as uncached, then synchronously flush that range of VAs from the
+    /// coprocessor cache. This is required to safely unmap cached/private mappings.
     fn remap_uncached_and_flush(&mut self) {
         let mut owner = self.0.owner.lock();
         mod_dev_dbg!(
@@ -483,40 +542,48 @@ impl Drop for Mapping {
     }
 }
 
+/// Shared UAT global data structures
 struct UatShared {
     handoff_rgn: UatRegion,
     ttbs_rgn: UatRegion,
 }
 
 impl UatShared {
+    /// Returns the handoff region area
     fn handoff(&self) -> &Handoff {
         // SAFETY: pointer is non-null per the type invariant
         unsafe { (self.handoff_rgn.map.as_ptr() as *mut Handoff).as_ref() }.unwrap()
     }
 
+    /// Returns the TTBAT area
     fn ttbs(&self) -> &[SlotTTBS; UAT_NUM_CTX] {
         // SAFETY: pointer is non-null per the type invariant
         unsafe { (self.ttbs_rgn.map.as_ptr() as *mut [SlotTTBS; UAT_NUM_CTX]).as_ref() }.unwrap()
     }
 }
 
+// SAFETY: Nothing here is unsafe to send across threads.
 unsafe impl Send for UatShared {}
 
+/// Inner data for the top-level UAT instance.
 struct UatInner {
     shared: Mutex<UatShared>,
     handoff_flush: [Mutex<HandoffFlush>; UAT_NUM_CTX + 1],
 }
 
 impl UatInner {
+    /// Take the lock on the shared data and return the guard.
     fn lock(&self) -> Guard<'_, Mutex<UatShared>> {
         self.shared.lock()
     }
 
+    /// Take a lock on a handoff flush slot and return the guard.
     fn lock_flush(&self, slot: u32) -> Guard<'_, Mutex<HandoffFlush>> {
         self.handoff_flush[slot as usize].lock()
     }
 }
 
+/// Top-level UAT manager object
 pub(crate) struct Uat {
     dev: driver::AsahiDevice,
     cfg: &'static hw::HwConfig,
@@ -526,7 +593,7 @@ pub(crate) struct Uat {
     slots: slotalloc::SlotAllocator<SlotInner>,
 
     kernel_vm: Vm,
-    kernel_lower_vm: Vm,
+    _kernel_lower_vm: Vm,
 }
 
 impl Drop for UatRegion {
@@ -537,6 +604,7 @@ impl Drop for UatRegion {
 }
 
 impl Handoff {
+    /// Lock the handoff region from firmware access
     fn lock(&self) {
         self.lock_ap.store(1, Ordering::Relaxed);
         fence(Ordering::SeqCst);
@@ -552,11 +620,13 @@ impl Handoff {
         fence(Ordering::Acquire);
     }
 
+    /// Unlock the handoff region, allowing firmware access
     fn unlock(&self) {
         self.turn.store(1, Ordering::Relaxed);
         self.lock_ap.store(0, Ordering::Release);
     }
 
+    /// Returns the current Vm slot mapped by the firmware for lower/unprivileged access, if any.
     fn current_slot(&self) -> Option<u32> {
         let slot = self.cur_slot.load(Ordering::Relaxed);
         if slot == 0 || slot == u32::MAX {
@@ -566,6 +636,7 @@ impl Handoff {
         }
     }
 
+    /// Initialize the handoff region
     fn init(&self) -> Result {
         self.magic_ap.store(PPL_MAGIC, Ordering::Relaxed);
         self.cur_slot.store(0, Ordering::Relaxed);
@@ -603,11 +674,17 @@ impl Handoff {
     }
 }
 
+/// Represents a single flush info slot in the handoff region.
+///
+/// # Invariants
+/// The pointer is valid and there is no aliasing HandoffFlush instance.
 struct HandoffFlush(*const FlushInfo);
 
+// SAFETY: These pointers are safe to send across threads.
 unsafe impl Send for HandoffFlush {}
 
 impl HandoffFlush {
+    /// Set up a flush operation for the coprocessor
     fn begin_flush(&self, start: u64, size: u64) {
         let flush = unsafe { self.0.as_ref().unwrap() };
 
@@ -620,6 +697,7 @@ impl HandoffFlush {
         flush.state.store(1, Ordering::Relaxed);
     }
 
+    /// Complete a flush operation for the coprocessor
     fn end_flush(&self) {
         let flush = unsafe { self.0.as_ref().unwrap() };
         let state = flush.state.load(Ordering::Relaxed);
@@ -652,6 +730,7 @@ impl io_pgtable::FlushOps for Uat {
 }
 
 impl Vm {
+    /// Create a new virtual memory address space
     fn new(
         dev: driver::AsahiDevice,
         uat_inner: Arc<UatInner>,
@@ -699,15 +778,16 @@ impl Vm {
                 bind_token: None,
                 active_users: 0,
                 id,
-                file_id,
             }))?,
         })
     }
 
+    /// Get the translation table base for this Vm
     fn ttb(&self) -> u64 {
         self.inner.lock().ttb()
     }
 
+    /// Map a GEM object (using its `SGTable`) into this Vm at a free address.
     pub(crate) fn map(&self, size: usize, sgt: gem::SGTable) -> Result<Mapping> {
         let mut inner = self.inner.lock();
 
@@ -727,6 +807,7 @@ impl Vm {
         Ok(Mapping(node))
     }
 
+    /// Map a GEM object (using its `SGTable`) into this Vm at a free address in a given range.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn map_in_range(
         &self,
@@ -761,6 +842,7 @@ impl Vm {
         Ok(Mapping(node))
     }
 
+    /// Map a GEM object (using its `SGTable`) into this Vm at a specific address.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn map_at(
         &self,
@@ -789,6 +871,8 @@ impl Vm {
         inner.map_node(&node, prot)?;
         Ok(Mapping(node))
     }
+
+    /// Add a direct MMIO mapping to this Vm at a free address.
     pub(crate) fn map_io(&self, phys: usize, size: usize, rw: bool) -> Result<Mapping> {
         let prot = if rw { PROT_FW_MMIO_RW } else { PROT_FW_MMIO_RO };
         let mut inner = self.inner.lock();
@@ -831,10 +915,12 @@ impl Vm {
         Ok(Mapping(node))
     }
 
+    /// Returns the unique ID of this Vm
     pub(crate) fn id(&self) -> u64 {
         self.id
     }
 
+    /// Returns the unique File ID of the owner of this Vm
     pub(crate) fn file_id(&self) -> u64 {
         self.file_id
     }
@@ -888,6 +974,7 @@ impl Drop for VmInner {
 }
 
 impl Uat {
+    /// Map a bootloader-preallocated memory region
     fn map_region(
         dev: &dyn device::RawDevice,
         name: &CStr,
@@ -954,27 +1041,30 @@ impl Uat {
             }
             Some(map) => Ok(UatRegion {
                 base: res.start,
-                size: rgn_size,
                 map,
             }),
         }
     }
 
+    /// Returns a view into the root kernel (upper half) page table
     fn kpt0(&self) -> &[Pte; UAT_NPTE] {
         // SAFETY: pointer is non-null per the type invariant
         unsafe { (self.pagetables_rgn.map.as_ptr() as *mut [Pte; UAT_NPTE]).as_ref() }.unwrap()
     }
 
+    /// Returns a reference to the global kernel (upper half) `Vm`
     pub(crate) fn kernel_vm(&self) -> &Vm {
         &self.kernel_vm
     }
 
+    /// Returns the base physical address of the TTBAT region.
     pub(crate) fn ttb_base(&self) -> u64 {
         let inner = self.inner.lock();
 
         inner.ttbs_rgn.base
     }
 
+    /// Binds a `Vm` to a slot, preferring the last used one.
     pub(crate) fn bind(&self, vm: &Vm) -> Result<VmBind> {
         let mut inner = vm.inner.lock();
 
@@ -1018,6 +1108,7 @@ impl Uat {
         ))
     }
 
+    /// Creates a new `Vm` linked to this UAT.
     pub(crate) fn new_vm(&self, id: u64, file_id: u64) -> Result<Vm> {
         Vm::new(
             self.dev.clone(),
@@ -1029,6 +1120,7 @@ impl Uat {
         )
     }
 
+    /// Creates the reference-counted inner data for a new `Uat` instance.
     #[inline(never)]
     fn make_inner(dev: &driver::AsahiDevice) -> Result<Arc<UatInner>> {
         let handoff_rgn = Self::map_region(dev, c_str!("handoff"), HANDOFF_SIZE, false)?;
@@ -1057,6 +1149,7 @@ impl Uat {
         .into())
     }
 
+    /// Creates a new `Uat` instance given the relevant hardware config.
     #[inline(never)]
     pub(crate) fn new(dev: &driver::AsahiDevice, cfg: &'static hw::HwConfig) -> Result<Self> {
         dev_info!(dev, "MMU: Initializing...\n");
@@ -1079,7 +1172,7 @@ impl Uat {
             cfg,
             pagetables_rgn,
             kernel_vm,
-            kernel_lower_vm,
+            _kernel_lower_vm: kernel_lower_vm,
             inner,
             slots: slotalloc::SlotAllocator::new(UAT_USER_CTX as u32, (), |_inner, _slot| {
                 SlotInner()
