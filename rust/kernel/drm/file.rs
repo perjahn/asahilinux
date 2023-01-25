@@ -69,15 +69,21 @@ impl<T: DriverFile> File<T> {
         }
     }
 
+    /// Return the raw pointer to the underlying `drm_file`.
     pub(super) fn raw(&self) -> *const bindings::drm_file {
         self.raw
     }
 
+    /// Return an immutable reference to the raw `drm_file` structure.
     pub(super) fn file(&self) -> &bindings::drm_file {
         unsafe { &*self.raw }
     }
+}
 
-    pub fn inner(&self) -> &T {
+impl<T: DriverFile> Deref for File<T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
         unsafe { &*(self.file().driver_priv as *const T) }
     }
 }
