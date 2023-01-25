@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0 OR MIT
 #![allow(non_snake_case)]
 
-//! DRM IOCTL definitions
+//! DRM IOCTL definitions.
 //!
 //! C header: [`include/linux/drm/drm_ioctl.h`](../../../../include/linux/drm/drm_ioctl.h)
 
