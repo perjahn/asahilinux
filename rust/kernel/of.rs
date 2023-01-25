@@ -196,7 +196,12 @@ impl Node {
         NonZeroU32::new(ret.try_into().ok()?)
     }
 
+    /// Parse a phandle property and return the Node referenced at a given index, if any.
+    ///
+    /// Used only for phandle properties with no arguments.
     pub fn parse_phandle(&self, name: &CStr, index: usize) -> Option<Node> {
+        // SAFETY: `raw_node` is valid per the type invariant. `of_parse_phandle` returns an
+        // owned reference.
         unsafe {
             Node::from_raw(bindings::of_parse_phandle(
                 self.raw_node,
@@ -275,18 +280,27 @@ impl<'a> Property<'a> {
         }
     }
 
+    /// Returns the name of the property as a `CStr`.
     pub fn name(&self) -> &CStr {
+        // SAFETY: `raw` is valid per the type invariant, and the lifetime of the `CStr` does not
+        // outlive it.
         unsafe { CStr::from_char_ptr((*self.raw).name) }
     }
 
+    /// Returns the name of the property as a `&[u8]`.
     pub fn value(&self) -> &[u8] {
+        // SAFETY: `raw` is valid per the type invariant, and the lifetime of the slice does not
+        // outlive it.
         unsafe { core::slice::from_raw_parts((*self.raw).value as *const u8, self.len()) }
     }
 
+    /// Returns the length of the property in bytes.
     pub fn len(&self) -> usize {
+        // SAFETY: `raw` is valid per the type invariant.
         unsafe { (*self.raw).length.try_into().unwrap() }
     }
 
+    /// Returns true if the property is empty (zero-length), which typically represents boolean true.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
