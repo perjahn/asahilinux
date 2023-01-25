@@ -43,20 +43,48 @@ pub struct NodeData<A: AllocInner<T>, T> {
     inner: T,
 }
 
+// SAFETY: Allocator ops take the mutex, and there are no mutable actions on the node.
 unsafe impl<A: Send + AllocInner<T>, T: Send> Send for NodeData<A, T> {}
 unsafe impl<A: Send + AllocInner<T>, T: Sync> Sync for NodeData<A, T> {}
 
+/// Available MM node insertion modes
 #[repr(u32)]
 pub enum InsertMode {
+    /// Search for the smallest hole (within the search range) that fits the desired node.
+    ///
+    /// Allocates the node from the bottom of the found hole.
     Best = bindings::drm_mm_insert_mode_DRM_MM_INSERT_BEST,
+
+    /// Search for the lowest hole (address closest to 0, within the search range) that fits the
+    /// desired node.
+    ///
+    /// Allocates the node from the bottom of the found hole.
     Low = bindings::drm_mm_insert_mode_DRM_MM_INSERT_LOW,
+
+    /// Search for the highest hole (address closest to U64_MAX, within the search range) that fits
+    /// the desired node.
+    ///
+    /// Allocates the node from the top of the found hole. The specified alignment for the node is
+    /// applied to the base of the node (`Node.start()`).
     High = bindings::drm_mm_insert_mode_DRM_MM_INSERT_HIGH,
+
+    /// Search for the most recently evicted hole (within the search range) that fits the desired
+    /// node. This is appropriate for use immediately after performing an eviction scan and removing
+    /// the selected nodes to form a hole.
+    ///
+    /// Allocates the node from the bottom of the found hole.
     Evict = bindings::drm_mm_insert_mode_DRM_MM_INSERT_EVICT,
 }
 
+/// A clonable, interlocked reference to the allocator state.
+///
+/// This is useful to perform actions on the user-supplied `AllocInner<T>` type given just a Node,
+/// without immediately taking the lock.
+#[derive(Clone)]
 pub struct InnerRef<A: AllocInner<T>, T>(Arc<Mutex<MmInner<A, T>>>);
 
 impl<A: AllocInner<T>, T> InnerRef<A, T> {
+    /// Operate on the user `AllocInner<T>` implementation, taking the lock.
     pub fn with<RetVal>(&self, cb: impl FnOnce(&mut A) -> RetVal) -> RetVal {
         let mut l = self.0.lock();
         cb(&mut l.1)
@@ -110,38 +138,54 @@ impl<A: AllocInner<T>, T> Drop for NodeData<A, T> {
         if self.valid {
             let mut guard = self.mm.lock();
 
+            // Inform the user allocator that a node is being dropped.
             guard
                 .1
                 .drop_object(self.start(), self.size(), self.color(), &mut self.inner);
+            // SAFETY: The MM lock is still taken, so we can safely remove the node.
             unsafe { bindings::drm_mm_remove_node(&mut self.node) };
         }
     }
 }
 
+/// An instance of a DRM MM range allocator.
 pub struct Allocator<A: AllocInner<T>, T> {
     mm: Arc<Mutex<MmInner<A, T>>>,
     _p: PhantomData<T>,
 }
 
 impl<A: AllocInner<T>, T> Allocator<A, T> {
+    /// Create a new range allocator for the given start and size range of addresses.
+    ///
+    /// The user may optionally provide an inner object representing allocator state, which will
+    /// be protected by the same lock. If not required, `()` can be used.
     pub fn new(start: u64, size: u64, inner: A) -> Result<Allocator<A, T>> {
-        let mm: UniqueArc<Mutex<MmInner<A, T>>> =
-            UniqueArc::try_new(Mutex::new(MmInner(Opaque::uninit(), inner, PhantomData)))?;
+        let mm: Pin<UniqueArc<Mutex<MmInner<A, T>>>> =
+            UniqueArc::try_new(Mutex::new(MmInner(Opaque::uninit(), inner, PhantomData)))?.into();
 
         unsafe {
+            // SAFETY: The Opaque instance provides a valid pointer, and it is initialized after
+            // this call.
             bindings::drm_mm_init(mm.lock().0.get(), start, size);
         }
 
         Ok(Allocator {
-            mm: Pin::from(mm).into(),
+            mm: mm.into(),
             _p: PhantomData,
         })
     }
 
+    /// Insert a new node into the allocator of a given size.
+    ///
+    /// `node` is the user `T` type data to store into the node.
     pub fn insert_node(&mut self, node: T, size: u64) -> Result<Node<A, T>> {
         self.insert_node_generic(node, size, 0, 0, InsertMode::Best)
     }
 
+    /// Insert a new node into the allocator of a given size, with configurable alignment,
+    /// color, and insertion mode.
+    ///
+    /// `node` is the user `T` type data to store into the node.
     pub fn insert_node_generic(
         &mut self,
         node: T,
@@ -153,6 +197,10 @@ impl<A: AllocInner<T>, T> Allocator<A, T> {
         self.insert_node_in_range(node, size, alignment, color, 0, u64::MAX, mode)
     }
 
+    /// Insert a new node into the allocator of a given size, with configurable alignment,
+    /// color, insertion mode, and sub-range to allocate from.
+    ///
+    /// `node` is the user `T` type data to store into the node.
     #[allow(clippy::too_many_arguments)]
     pub fn insert_node_in_range(
         &mut self,
@@ -171,9 +219,11 @@ impl<A: AllocInner<T>, T> Allocator<A, T> {
             mm: self.mm.clone(),
         })?;
 
+        let guard = self.mm.lock();
+        // SAFETY: We hold the lock and all pointers are valid.
         to_result(unsafe {
             bindings::drm_mm_insert_node_in_range(
-                self.mm.lock().0.get(),
+                guard.0.get(),
                 &mut mm_node.node,
                 size,
                 alignment,
@@ -210,27 +260,31 @@ impl<A: AllocInner<T>, T> Allocator<A, T> {
         mm_node.node.size = size;
         mm_node.node.color = color as core::ffi::c_ulong;
 
-        to_result(unsafe {
-            bindings::drm_mm_reserve_node(self.mm.lock().0.get(), &mut mm_node.node)
-        })?;
+        let guard = self.mm.lock();
+        // SAFETY: We hold the lock and all pointers are valid.
+        to_result(unsafe { bindings::drm_mm_reserve_node(guard.0.get(), &mut mm_node.node) })?;
 
         mm_node.valid = true;
 
         Ok(Pin::from(mm_node))
     }
 
+    /// Operate on the inner user type `A`, taking the allocator lock
     pub fn with_inner<RetVal>(&self, cb: impl FnOnce(&mut A) -> RetVal) -> RetVal {
-        let mut l = self.mm.lock();
-        cb(&mut l.1)
+        let mut guard = self.mm.lock();
+        cb(&mut guard.1)
     }
 }
 
 impl<A: AllocInner<T>, T> Drop for MmInner<A, T> {
     fn drop(&mut self) {
+        // SAFETY: If the MmInner is dropped then all nodes are gone (since they hold references),
+        // so it is safe to tear down the allocator.
         unsafe {
             bindings::drm_mm_takedown(self.0.get());
         }
     }
 }
 
+// MmInner is safely Send if the AllocInner user type is Send.
 unsafe impl<A: Send + AllocInner<T>, T> Send for MmInner<A, T> {}
