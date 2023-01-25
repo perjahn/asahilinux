@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0 OR MIT
-#![allow(missing_docs)]
 
-//! DRM driver core
+//! DRM driver core.
 //!
 //! C header: [`include/linux/drm/drm_drv.h`](../../../../include/linux/drm/drm_drv.h)
 
@@ -15,23 +14,43 @@ use core::{
 };
 use macros::vtable;
 
+/// Driver use the GEM memory manager. This should be set for all modern drivers.
 pub const FEAT_GEM: u32 = bindings::drm_driver_feature_DRIVER_GEM;
+/// Driver supports mode setting interfaces (KMS).
 pub const FEAT_MODESET: u32 = bindings::drm_driver_feature_DRIVER_MODESET;
+/// Driver supports dedicated render nodes.
 pub const FEAT_RENDER: u32 = bindings::drm_driver_feature_DRIVER_RENDER;
+/// Driver supports the full atomic modesetting userspace API.
+///
+/// Drivers which only use atomic internally, but do not support the full userspace API (e.g. not
+/// all properties converted to atomic, or multi-plane updates are not guaranteed to be tear-free)
+/// should not set this flag.
 pub const FEAT_ATOMIC: u32 = bindings::drm_driver_feature_DRIVER_ATOMIC;
+/// Driver supports DRM sync objects for explicit synchronization of command submission.
 pub const FEAT_SYNCOBJ: u32 = bindings::drm_driver_feature_DRIVER_SYNCOBJ;
+/// Driver supports the timeline flavor of DRM sync objects for explicit synchronization of command
+/// submission.
 pub const FEAT_SYNCOBJ_TIMELINE: u32 = bindings::drm_driver_feature_DRIVER_SYNCOBJ_TIMELINE;
 
+/// Information data for a DRM Driver.
 pub struct DriverInfo {
+    /// Driver major version.
     pub major: i32,
+    /// Driver minor version.
     pub minor: i32,
+    /// Driver patchlevel version.
     pub patchlevel: i32,
+    /// Driver name.
     pub name: &'static CStr,
+    /// Driver description.
     pub desc: &'static CStr,
+    /// Driver date.
     pub date: &'static CStr,
 }
 
-// Internal memory management operations, to be set by memory managers (e.g. GEM)
+/// Internal memory management operation set, normally created by memory managers (e.g. GEM).
+///
+/// See `kernel::drm::gem` and `kernel::drm::gem::shmem`.
 pub struct AllocOps {
     pub(crate) gem_create_object: Option<
         unsafe extern "C" fn(
@@ -99,11 +118,13 @@ pub struct AllocOps {
     >,
 }
 
+/// Trait for memory manager implementations. Implemented internally.
 pub trait AllocImpl: private::Sealed + drm::gem::IntoGEMObject {
+    /// The C callback operations for this memory manager.
     const ALLOC_OPS: AllocOps;
 }
 
-/// A DRM driver.
+/// A DRM driver implementation.
 #[vtable]
 pub trait Driver {
     /// Context data associated with the DRM driver
@@ -119,14 +140,22 @@ pub trait Driver {
     /// The type used to represent a DRM File (client)
     type File: drm::file::DriverFile;
 
+    /// Driver metadata
     const INFO: DriverInfo;
+
+    /// Feature flags
     const FEATURES: u32;
+
+    /// IOCTL list. See `kernel::drm::ioctl::declare_drm_ioctls!{}`.
     const IOCTLS: &'static [drm::ioctl::DRMIOCTLDescriptor];
 }
 
 /// A registration of a DRM device
+///
+/// # Invariants:
+///
+/// drm is always a valid pointer to an allocated drm_device
 pub struct Registration<T: Driver> {
-    // Invariant: always a valid pointer to an allocated drm_device
     drm: drm::device::Device<T>,
     registered: bool,
     fops: bindings::file_operations,
@@ -208,7 +237,8 @@ impl<T: Driver> Registration<T> {
         let raw_drm = unsafe { bindings::drm_dev_alloc(&*vtable, parent.raw_device()) };
         let raw_drm = from_kernel_err_ptr(raw_drm)?;
 
-        // The reference count is one, and now we take ownership of that reference as a drm::device::Device.
+        // The reference count is one, and now we take ownership of that reference as a
+        // drm::device::Device.
         let drm = unsafe { drm::device::Device::from_raw(raw_drm) };
 
         Ok(Self {
@@ -224,7 +254,7 @@ impl<T: Driver> Registration<T> {
     /// Registers a DRM device with the rest of the kernel.
     ///
     /// Users are encouraged to use the [`drm_device_register`] macro because it automatically
-    /// defines the lock classes and calls the registration function.
+    /// picks up the current module.
     pub fn register(
         self: Pin<&mut Self>,
         data: T::Data,
