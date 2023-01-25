@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only OR MIT
-#![allow(missing_docs)]
 
-//! Driver for the Apple AGX GPUs found in Apple Silicon SoCs.
+//! Top-level GPU driver implementation.
 
 use kernel::{
     c_str, device, drm, drm::drv, drm::ioctl, error::Result, of, platform, prelude::*, sync::Arc,
@@ -12,6 +11,7 @@ use crate::{debug, file, gem, gpu, hw, regs};
 use kernel::device::RawDevice;
 use kernel::macros::vtable;
 
+/// Driver metadata
 const INFO: drv::DriverInfo = drv::DriverInfo {
     major: 0,
     minor: 0,
@@ -21,23 +21,31 @@ const INFO: drv::DriverInfo = drv::DriverInfo {
     date: c_str!("20220831"),
 };
 
+/// Device data for the driver registration.
+///
+/// Holds a reference to the top-level `GpuManager` object.
 pub(crate) struct AsahiData {
     pub(crate) dev: device::Device,
     pub(crate) gpu: Arc<dyn gpu::GpuManager>,
 }
 
+/// Convenience type alias for the `device::Data` type for this driver.
 type DeviceData = device::Data<drv::Registration<AsahiDriver>, regs::Resources, AsahiData>;
 
+/// Empty struct representing this driver.
 pub(crate) struct AsahiDriver;
 
+/// Convenience type alias for the DRM device type for this driver.
 pub(crate) type AsahiDevice = kernel::drm::device::Device<AsahiDriver>;
 
-impl AsahiDriver {}
-
+/// DRM Driver implementation for `AsahiDriver`.
 #[vtable]
 impl drv::Driver for AsahiDriver {
+    /// Our `DeviceData` type, reference-counted
     type Data = Arc<DeviceData>;
+    /// Our `File` type.
     type File = file::File;
+    /// Our `Object` type.
     type Object = gem::Object;
 
     const INFO: drv::DriverInfo = INFO;
@@ -65,6 +73,7 @@ impl drv::Driver for AsahiDriver {
     }
 }
 
+// OF Device ID table.
 kernel::define_of_id_table! {ASAHI_ID_TABLE, &'static hw::HwConfig, [
     (of::DeviceId::Compatible(b"apple,agx-t8103"), Some(&hw::t8103::HWCONFIG)),
     (of::DeviceId::Compatible(b"apple,agx-t8112"), Some(&hw::t8112::HWCONFIG)),
@@ -73,12 +82,17 @@ kernel::define_of_id_table! {ASAHI_ID_TABLE, &'static hw::HwConfig, [
     (of::DeviceId::Compatible(b"apple,agx-t6002"), Some(&hw::t600x::HWCONFIG_T6002)),
 ]}
 
+/// Platform Driver implementation for `AsahiDriver`.
 impl platform::Driver for AsahiDriver {
+    /// Our `DeviceData` type, reference-counted
     type Data = Arc<DeviceData>;
+    /// Data associated with each hardware ID.
     type IdInfo = &'static hw::HwConfig;
 
+    // Assign the above OF ID table to this driver.
     kernel::driver_of_id_table!(ASAHI_ID_TABLE);
 
+    /// Device probe function.
     fn probe(
         pdev: &mut platform::Device,
         id_info: Option<&Self::IdInfo>,
@@ -147,4 +161,5 @@ impl platform::Driver for AsahiDriver {
     }
 }
 
+// Export the OF ID table as a module ID table, to make modpost/autoloading work.
 kernel::module_of_id_table!(MOD_TABLE, ASAHI_ID_TABLE);
