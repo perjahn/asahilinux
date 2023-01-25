@@ -1026,7 +1026,7 @@ impl file::Queue for RenderQueue::ver {
                             unk_60: U64(0x0), // fixed
                             #[ver(G < G14)]
                             core_mask: Array::new([
-                                *core_masks.get(0).unwrap_or(&0),
+                                *core_masks.first().unwrap_or(&0),
                                 *core_masks.get(1).unwrap_or(&0),
                             ]),
                             preempt_buf1: inner.scene.preempt_buf_1_pointer(),
