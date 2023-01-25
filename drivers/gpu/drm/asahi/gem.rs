@@ -207,11 +207,11 @@ impl shmem::DriverObject for DriverObject {
 }
 
 impl rtkit::Buffer for ObjectRef {
-    fn iova(&self) -> Option<usize> {
-        self.iova(0)
+    fn iova(&self) -> Result<usize> {
+        self.iova(0).ok_or(EIO)
     }
-    fn buf(&mut self) -> Option<&mut [u8]> {
-        let vmap = self.vmap.as_mut()?;
-        Some(vmap.as_mut_slice())
+    fn buf(&mut self) -> Result<&mut [u8]> {
+        let vmap = self.vmap.as_mut().ok_or(ENOMEM)?;
+        Ok(vmap.as_mut_slice())
     }
 }
