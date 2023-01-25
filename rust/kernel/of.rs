@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0
-#![allow(missing_docs)]
 
 //! Devicetree and Open Firmware abstractions.
 //!
 //! C header: [`include/linux/of_*.h`](../../../../include/linux/of_*.h)
 
 use core::marker::PhantomData;
+use core::num::NonZeroU32;
 
 use crate::{
     bindings, driver,
@@ -88,58 +88,89 @@ unsafe impl const driver::RawDeviceId for DeviceId {
     }
 }
 
+/// Type alias for an OF phandle
+pub type PHandle = bindings::phandle;
+
+/// An OF device tree node.
+///
+/// # Invariants
+///
+/// `raw_node` points to a valid OF node, and we hold a reference to it.
 pub struct Node {
     raw_node: *mut bindings::device_node,
 }
 
-pub type PHandle = bindings::phandle;
-
 impl Node {
+    /// Creates a `Node` from a raw C pointer. The pointer must be owned (the caller
+    /// gives up its reference). If the pointer is NULL, returns None.
     pub(crate) unsafe fn from_raw(raw_node: *mut bindings::device_node) -> Option<Node> {
         if raw_node.is_null() {
             None
         } else {
+            // INVARIANT: `raw_node` is valid per the above contract, and non-null per the
+            // above check.
             Some(Node { raw_node })
         }
     }
 
+    /// Creates a `Node` from a raw C pointer. The pointer must be borrowed (the caller
+    /// retains its reference, which must be valid for the duration of the call). If the
+    /// pointer is NULL, returns None.
     pub(crate) unsafe fn get_from_raw(raw_node: *mut bindings::device_node) -> Option<Node> {
+        // SAFETY: `raw_node` is valid or NULL per the above contract. `of_node_get` can handle
+        // NULL.
         unsafe { Node::from_raw(bindings::of_node_get(raw_node)) }
     }
 
+    /// Returns a reference to the underlying C `device_node` structure.
     fn node(&self) -> &bindings::device_node {
+        // SAFETY: `raw_node` is valid per the type invariant.
         unsafe { &*self.raw_node }
     }
 
+    /// Returns the name of the node.
     pub fn name(&self) -> &CStr {
+        // SAFETY: The lifetime of the `CStr` is the same as the lifetime of this `Node`.
         unsafe { CStr::from_char_ptr(self.node().name) }
     }
 
+    /// Returns the phandle for this node.
     pub fn phandle(&self) -> PHandle {
         self.node().phandle
     }
 
+    /// Returns the full name (with address) for this node.
     pub fn full_name(&self) -> &CStr {
+        // SAFETY: The lifetime of the `CStr` is the same as the lifetime of this `Node`.
         unsafe { CStr::from_char_ptr(self.node().full_name) }
     }
 
+    /// Returns `true` if the node is the root node.
     pub fn is_root(&self) -> bool {
         unsafe { bindings::of_node_is_root(self.raw_node) }
     }
 
+    /// Returns the parent node, if any.
     pub fn parent(&self) -> Option<Node> {
+        // SAFETY: `raw_node` is valid per the type invariant, and `of_get_parent()` takes a
+        // new reference to the parent (or returns NULL).
         unsafe { Node::from_raw(bindings::of_get_parent(self.raw_node)) }
     }
 
+    /// Returns an iterator over the node's children.
     // TODO: use type alias for return type once type_alias_impl_trait is stable
     pub fn children(
         &self,
     ) -> NodeIterator<'_, impl Fn(*mut bindings::device_node) -> *mut bindings::device_node + '_>
     {
+        // SAFETY: `raw_node` is valid per the type invariant, and the lifetime of the `NodeIterator`
+        // does not exceed the lifetime of the `Node` so it can borrow its reference.
         NodeIterator::new(|prev| unsafe { bindings::of_get_next_child(self.raw_node, prev) })
     }
 
+    /// Find a child by its name and return it, or None if not found.
     pub fn get_child_by_name(&self, name: &CStr) -> Option<Node> {
+        // SAFETY: `raw_node` is valid per the type invariant.
         unsafe {
             Node::from_raw(bindings::of_get_child_by_name(
                 self.raw_node,
@@ -168,7 +199,11 @@ impl Node {
         }
     }
 
+    /// Look up a node property by name, returning a `Property` object if found.
     pub fn find_property(&self, propname: &CStr) -> Option<Property<'_>> {
+        // SAFETY: `raw_node` is valid per the type invariant. The property structure
+        // returned borrows the reference to the owning node, and so has the same
+        // lifetime.
         unsafe {
             Property::from_raw(bindings::of_find_property(
                 self.raw_node,
@@ -178,6 +213,11 @@ impl Node {
         }
     }
 
+    /// Look up a mandatory node property by name, and decode it into a value type.
+    ///
+    /// Returns `Err(ENOENT)` if the property is not found.
+    ///
+    /// The type `T` must implement `TryFrom<Property<'_>>`.
     pub fn get_property<'a, T: TryFrom<Property<'a>>>(&'a self, propname: &CStr) -> Result<T>
     where
         crate::error::Error: From<<T as TryFrom<Property<'a>>>::Error>,
@@ -197,6 +237,11 @@ impl Node {
     }
 }
 
+/// A property attached to a device tree `Node`.
+///
+/// # Invariants
+///
+/// `raw` must be valid and point to a property that outlives the lifetime of this object.
 #[derive(Copy, Clone)]
 pub struct Property<'a> {
     raw: *mut bindings::property,
@@ -204,6 +249,9 @@ pub struct Property<'a> {
 }
 
 impl<'a> Property<'a> {
+    /// Create a `Property` object from a raw C pointer. Returns `None` if NULL.
+    ///
+    /// The passed pointer must be valid and outlive the lifetime argument, or NULL.
     unsafe fn from_raw(raw: *mut bindings::property) -> Option<Property<'a>> {
         if raw.is_null() {
             None
@@ -297,6 +345,18 @@ prop_int_type!(i16);
 prop_int_type!(i32);
 prop_int_type!(i64);
 
+/// An iterator across a collection of Node objects.
+///
+/// # Invariants
+///
+/// `cur` must be NULL or a valid node owned reference. If NULL, it represents either the first
+/// or last position of the iterator.
+///
+/// If `done` is true, `cur` must be NULL.
+///
+/// fn_next must be a callback that iterates from one node to the next, and it must not capture
+/// values that exceed the lifetime of the iterator. It must return owned references and also
+/// take owned references.
 pub struct NodeIterator<'a, T>
 where
     T: Fn(*mut bindings::device_node) -> *mut bindings::device_node,
@@ -312,6 +372,7 @@ where
     T: Fn(*mut bindings::device_node) -> *mut bindings::device_node,
 {
     fn new(next: T) -> NodeIterator<'a, T> {
+        // INVARIANT: `cur` is initialized to NULL to represent the initial state.
         NodeIterator {
             cur: core::ptr::null_mut(),
             done: false,
@@ -331,41 +392,64 @@ where
         if self.done {
             None
         } else {
+            // INVARIANT: if the new `cur` is NULL, then the iterator has reached its end and we
+            // set `done` to `true`.
             self.cur = (self.fn_next)(self.cur);
             self.done = self.cur.is_null();
-            unsafe { Node::from_raw(self.cur) }
+            // SAFETY: `fn_next` must return an owned reference per the iterator contract.
+            // The iterator itself is considered to own this reference, so we take another one.
+            unsafe { Node::get_from_raw(self.cur) }
         }
     }
 }
 
+// Drop impl to ensure we drop the current node being iterated on, if any.
+impl<'a, T> Drop for NodeIterator<'a, T>
+where
+    T: Fn(*mut bindings::device_node) -> *mut bindings::device_node,
+{
+    fn drop(&mut self) {
+        // SAFETY: `cur` is valid or NULL, and `of_node_put()` can handle NULL.
+        unsafe { bindings::of_node_put(self.cur) };
+    }
+}
+
+/// Returns the root node of the OF device tree (if any).
 pub fn root() -> Option<Node> {
     unsafe { Node::get_from_raw(bindings::of_root) }
 }
 
+/// Returns the /chosen node of the OF device tree (if any).
 pub fn chosen() -> Option<Node> {
     unsafe { Node::get_from_raw(bindings::of_chosen) }
 }
 
+/// Returns the /aliases node of the OF device tree (if any).
 pub fn aliases() -> Option<Node> {
     unsafe { Node::get_from_raw(bindings::of_aliases) }
 }
 
+/// Returns the system stdout node of the OF device tree (if any).
 pub fn stdout() -> Option<Node> {
     unsafe { Node::get_from_raw(bindings::of_stdout) }
 }
 
+/// Looks up a node in the device tree by phandle.
 pub fn find_node_by_phandle(handle: PHandle) -> Option<Node> {
     unsafe { Node::from_raw(bindings::of_find_node_by_phandle(handle)) }
 }
 
 impl Clone for Node {
     fn clone(&self) -> Node {
+        // SAFETY: `raw_node` is valid and non-NULL per the type invariant,
+        // so this can never return None.
         unsafe { Node::get_from_raw(self.raw_node).unwrap() }
     }
 }
 
 impl Drop for Node {
     fn drop(&mut self) {
+        // SAFETY: `raw_node` is valid per the type invariant.
         unsafe { bindings::of_node_put(self.raw_node) };
     }
 }
