@@ -228,6 +228,11 @@ impl Node {
         Ok(self.find_property(propname).ok_or(ENOENT)?.try_into()?)
     }
 
+    /// Look up an optional node property by name, and decode it into a value type.
+    ///
+    /// Returns `Ok(None)` if the property is not found.
+    ///
+    /// The type `T` must implement `TryFrom<Property<'_>>`.
     pub fn get_opt_property<'a, T: TryFrom<Property<'a>>>(
         &'a self,
         propname: &CStr,
