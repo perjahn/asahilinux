@@ -936,7 +936,7 @@ impl GpuManager for GpuManager::ver {
     }
 
     fn get_dyncfg(&self) -> &hw::DynConfig {
-        &*self.dyncfg
+        &self.dyncfg
     }
 
     fn start_op(&self) -> Result<OpGuard<'_>> {
