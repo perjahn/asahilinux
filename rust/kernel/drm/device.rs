@@ -34,6 +34,7 @@ impl<T: drm::drv::Driver> Device<T> {
         self.ptr
     }
 
+    /// Returns a borrowed reference to the user data associated with this Device.
     pub fn data(&self) -> <T::Data as PointerWrapper>::Borrowed<'_> {
         unsafe { T::Data::borrow((*self.ptr).dev_private) }
     }
