@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0-only OR MIT
-#![allow(missing_docs)]
-#![allow(unused_imports)]
 
-//! Asahi ring buffer channels
+//! GPU ring buffer channels
+//!
+//! The GPU firmware use a set of ring buffer channels to receive commands from the driver and send
+//! it notifications and status messages.
+//!
+//! These ring buffers mostly follow uniform conventions, so they share the same base
+//! implementation.
 
 use crate::debug::*;
 use crate::driver::AsahiDevice;
@@ -11,10 +15,11 @@ use crate::fw::initdata::{raw, ChannelRing};
 use crate::fw::types::*;
 use crate::{event, gpu, mem};
 use core::time::Duration;
-use kernel::{c_str, dbg, delay::coarse_sleep, prelude::*, sync::Arc, time};
+use kernel::{c_str, delay::coarse_sleep, prelude::*, sync::Arc, time};
 
 pub(crate) use crate::fw::channels::PipeType;
 
+/// A receive (FW->driver) channel.
 pub(crate) struct RxChannel<T: RxChannelState, U: Copy + Default>
 where
     for<'a> <T as GpuStruct>::Raw<'a>: Debug + Default,
@@ -30,6 +35,7 @@ impl<T: RxChannelState, U: Copy + Default> RxChannel<T, U>
 where
     for<'a> <T as GpuStruct>::Raw<'a>: Debug + Default,
 {
+    /// Allocates a new receive channel with a given message count.
     pub(crate) fn new(alloc: &mut gpu::KernelAllocators, count: usize) -> Result<RxChannel<T, U>> {
         Ok(RxChannel {
             ring: ChannelRing {
@@ -41,6 +47,10 @@ where
         })
     }
 
+    /// Receives a message on the specified sub-channel index, optionally leaving in the ring
+    /// buffer.
+    ///
+    /// Returns None if the channel is empty.
     fn get_or_peek(&mut self, index: usize, peek: bool) -> Option<U> {
         self.ring.state.with(|raw, _inner| {
             let wptr = T::wptr(raw, index);
@@ -59,15 +69,22 @@ where
         })
     }
 
+    /// Receives a message on the specified sub-channel index, and dequeues it from the ring buffer.
+    ///
+    /// Returns None if the channel is empty.
     pub(crate) fn get(&mut self, index: usize) -> Option<U> {
         self.get_or_peek(index, false)
     }
 
+    /// Peeks a message on the specified sub-channel index, leaving it in the ring buffer.
+    ///
+    /// Returns None if the channel is empty.
     pub(crate) fn peek(&mut self, index: usize) -> Option<U> {
         self.get_or_peek(index, true)
     }
 }
 
+/// A transmit (driver->FW) channel.
 pub(crate) struct TxChannel<T: TxChannelState, U: Copy + Default>
 where
     for<'a> <T as GpuStruct>::Raw<'a>: Debug + Default,
@@ -81,6 +98,7 @@ impl<T: TxChannelState, U: Copy + Default> TxChannel<T, U>
 where
     for<'a> <T as GpuStruct>::Raw<'a>: Debug + Default,
 {
+    /// Allocates a new cached transmit channel with a given message count.
     pub(crate) fn new(alloc: &mut gpu::KernelAllocators, count: usize) -> Result<TxChannel<T, U>> {
         Ok(TxChannel {
             ring: ChannelRing {
@@ -92,6 +110,7 @@ where
         })
     }
 
+    /// Allocates a new uncached transmit channel with a given message count.
     pub(crate) fn new_uncached(
         alloc: &mut gpu::KernelAllocators,
         count: usize,
@@ -106,6 +125,9 @@ where
         })
     }
 
+    /// Send a message to the ring, returning a cookie with the ring buffer position.
+    ///
+    /// This will poll/block if the ring is full, which we don't really expect to happen.
     pub(crate) fn put(&mut self, msg: &U) -> u32 {
         self.ring.state.with(|raw, _inner| {
             let next_wptr = (self.wptr + 1) % self.count;
@@ -130,6 +152,10 @@ where
         self.wptr
     }
 
+    /// Wait for a previously submitted message to be popped off of the ring by the GPU firmware.
+    ///
+    /// This busy-loops, and is intended to be used for rare cases when we need to block for
+    /// completion of a cache management or invalidation operation synchronously.
     pub(crate) fn wait_for(&mut self, wptr: u32, timeout_ms: u64) -> Result {
         let timeout = time::ktime_get() + Duration::from_millis(timeout_ms);
         self.ring.state.with(|raw, _inner| {
@@ -144,6 +170,7 @@ where
     }
 }
 
+/// Device Control channel for global device management commands.
 #[versions(AGX)]
 pub(crate) struct DeviceControlChannel {
     dev: AsahiDevice,
@@ -154,6 +181,7 @@ pub(crate) struct DeviceControlChannel {
 impl DeviceControlChannel::ver {
     const COMMAND_TIMEOUT_MS: u64 = 100;
 
+    /// Allocate a new Device Control channel.
     pub(crate) fn new(
         dev: &AsahiDevice,
         alloc: &mut gpu::KernelAllocators,
@@ -164,20 +192,24 @@ impl DeviceControlChannel::ver {
         })
     }
 
+    /// Returns the raw `ChannelRing` structure to pass to firmware.
     pub(crate) fn to_raw(&self) -> raw::ChannelRing<ChannelState, DeviceControlMsg::ver> {
         self.ch.ring.to_raw()
     }
 
+    /// Submits a Device Control command.
     pub(crate) fn send(&mut self, msg: &DeviceControlMsg::ver) -> u32 {
         cls_dev_dbg!(DeviceControlCh, self.dev, "DeviceControl: {:?}", msg);
         self.ch.put(msg)
     }
 
+    /// Waits for a previously submitted Device Control command to complete.
     pub(crate) fn wait_for(&mut self, wptr: u32) -> Result {
         self.ch.wait_for(wptr, Self::COMMAND_TIMEOUT_MS)
     }
 }
 
+/// Pipe channel to submit WorkQueue execution requests.
 #[versions(AGX)]
 pub(crate) struct PipeChannel {
     dev: AsahiDevice,
@@ -186,6 +218,7 @@ pub(crate) struct PipeChannel {
 
 #[versions(AGX)]
 impl PipeChannel::ver {
+    /// Allocate a new Pipe submission channel.
     pub(crate) fn new(
         dev: &AsahiDevice,
         alloc: &mut gpu::KernelAllocators,
@@ -196,16 +229,19 @@ impl PipeChannel::ver {
         })
     }
 
+    /// Returns the raw `ChannelRing` structure to pass to firmware.
     pub(crate) fn to_raw(&self) -> raw::ChannelRing<ChannelState, PipeMsg::ver> {
         self.ch.ring.to_raw()
     }
 
+    /// Submits a Pipe kick command to the firmware.
     pub(crate) fn send(&mut self, msg: &PipeMsg::ver) {
         cls_dev_dbg!(PipeCh, self.dev, "Pipe: {:?}", msg);
         self.ch.put(msg);
     }
 }
 
+/// Firmware Control channel, used for secure cache flush requests.
 pub(crate) struct FwCtlChannel {
     dev: AsahiDevice,
     ch: TxChannel<FwCtlChannelState, FwCtlMsg>,
@@ -214,6 +250,7 @@ pub(crate) struct FwCtlChannel {
 impl FwCtlChannel {
     const COMMAND_TIMEOUT_MS: u64 = 100;
 
+    /// Allocate a new Firmware Control channel.
     pub(crate) fn new(
         dev: &AsahiDevice,
         alloc: &mut gpu::KernelAllocators,
@@ -224,20 +261,25 @@ impl FwCtlChannel {
         })
     }
 
+    /// Returns the raw `ChannelRing` structure to pass to firmware.
     pub(crate) fn to_raw(&self) -> raw::ChannelRing<FwCtlChannelState, FwCtlMsg> {
         self.ch.ring.to_raw()
     }
 
+    /// Submits a Firmware Control command to the firmware.
     pub(crate) fn send(&mut self, msg: &FwCtlMsg) -> u32 {
         cls_dev_dbg!(FwCtlCh, self.dev, "FwCtl: {:?}", msg);
         self.ch.put(msg)
     }
 
+    /// Waits for a previously submitted Firmware Control command to complete.
     pub(crate) fn wait_for(&mut self, wptr: u32) -> Result {
         self.ch.wait_for(wptr, Self::COMMAND_TIMEOUT_MS)
     }
 }
 
+/// Event channel, used to notify the driver of command completions, GPU faults and errors, and
+/// other events.
 pub(crate) struct EventChannel {
     dev: AsahiDevice,
     ch: RxChannel<ChannelState, RawEventMsg>,
@@ -246,6 +288,7 @@ pub(crate) struct EventChannel {
 }
 
 impl EventChannel {
+    /// Allocate a new Event channel.
     pub(crate) fn new(
         dev: &AsahiDevice,
         alloc: &mut gpu::KernelAllocators,
@@ -259,14 +302,17 @@ impl EventChannel {
         })
     }
 
+    /// Registers the managing `Gpu` instance that will handle events on this channel.
     pub(crate) fn set_manager(&mut self, gpu: Arc<dyn gpu::GpuManager>) {
         self.gpu = Some(gpu);
     }
 
+    /// Returns the raw `ChannelRing` structure to pass to firmware.
     pub(crate) fn to_raw(&self) -> raw::ChannelRing<ChannelState, RawEventMsg> {
         self.ch.ring.to_raw()
     }
 
+    /// Polls for new Event messages on this ring.
     pub(crate) fn poll(&mut self) {
         while let Some(msg) = self.ch.get(0) {
             let tag = unsafe { msg.raw.0 };
@@ -310,6 +356,9 @@ impl EventChannel {
     }
 }
 
+/// Firmware Log channel. This one is pretty special, since it has 6 sub-channels (for different log
+/// levels), and it also uses a side buffer to actually hold the log messages, only passing around
+/// pointers in the main buffer.
 pub(crate) struct FwLogChannel {
     dev: AsahiDevice,
     ch: RxChannel<FwLogChannelState, RawFwLogMsg>,
@@ -320,6 +369,7 @@ impl FwLogChannel {
     const RING_SIZE: usize = 0x100;
     const BUF_SIZE: usize = 0x100;
 
+    /// Allocate a new Firmware Log channel.
     pub(crate) fn new(
         dev: &AsahiDevice,
         alloc: &mut gpu::KernelAllocators,
@@ -333,14 +383,17 @@ impl FwLogChannel {
         })
     }
 
+    /// Returns the raw `ChannelRing` structure to pass to firmware.
     pub(crate) fn to_raw(&self) -> raw::ChannelRing<FwLogChannelState, RawFwLogMsg> {
         self.ch.ring.to_raw()
     }
 
+    /// Returns the GPU pointers to the firmware log payload buffer.
     pub(crate) fn get_buf(&self) -> GpuWeakPointer<[RawFwLogPayloadMsg]> {
         self.payload_buf.weak_pointer()
     }
 
+    /// Polls for new log messages on all sub-rings.
     pub(crate) fn poll(&mut self) {
         for i in 0..=FwLogChannelState::SUB_CHANNELS - 1 {
             while let Some(msg) = self.ch.peek(i) {
@@ -400,7 +453,10 @@ pub(crate) struct KTraceChannel {
     ch: RxChannel<ChannelState, RawKTraceMsg>,
 }
 
+/// KTrace channel, used to receive detailed execution trace markers from the firmware.
+/// We currently disable this in initdata, so no messages are expected here at this time.
 impl KTraceChannel {
+    /// Allocate a new KTrace channel.
     pub(crate) fn new(
         dev: &AsahiDevice,
         alloc: &mut gpu::KernelAllocators,
@@ -411,10 +467,12 @@ impl KTraceChannel {
         })
     }
 
+    /// Returns the raw `ChannelRing` structure to pass to firmware.
     pub(crate) fn to_raw(&self) -> raw::ChannelRing<ChannelState, RawKTraceMsg> {
         self.ch.ring.to_raw()
     }
 
+    /// Polls for new KTrace messages on this ring.
     pub(crate) fn poll(&mut self) {
         while let Some(msg) = self.ch.get(0) {
             cls_dev_dbg!(KTraceCh, self.dev, "KTrace: {:?}", msg);
@@ -422,6 +480,8 @@ impl KTraceChannel {
     }
 }
 
+/// Statistics channel, reporting power-related statistics to the driver.
+/// Not really implemented other than debug logs yet...
 #[versions(AGX)]
 pub(crate) struct StatsChannel {
     dev: AsahiDevice,
@@ -430,6 +490,7 @@ pub(crate) struct StatsChannel {
 
 #[versions(AGX)]
 impl StatsChannel::ver {
+    /// Allocate a new Statistics channel.
     pub(crate) fn new(
         dev: &AsahiDevice,
         alloc: &mut gpu::KernelAllocators,
@@ -440,10 +501,12 @@ impl StatsChannel::ver {
         })
     }
 
+    /// Returns the raw `ChannelRing` structure to pass to firmware.
     pub(crate) fn to_raw(&self) -> raw::ChannelRing<ChannelState, RawStatsMsg::ver> {
         self.ch.ring.to_raw()
     }
 
+    /// Polls for new statistics messages on this ring.
     pub(crate) fn poll(&mut self) {
         while let Some(msg) = self.ch.get(0) {
             let tag = unsafe { msg.raw.0 };
