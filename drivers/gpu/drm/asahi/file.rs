@@ -184,7 +184,7 @@ impl File {
         mod_dev_dbg!(
             device,
             "[File {}]: IOCTL: gem_create size={:#x?}",
-            file.inner().id,
+            file.id,
             data.size
         );
 
@@ -200,7 +200,7 @@ impl File {
         mod_dev_dbg!(
             device,
             "[File {}]: IOCTL: gem_create size={:#x} handle={:#x?}",
-            file.inner().id,
+            file.id,
             data.size,
             data.handle
         );
@@ -216,7 +216,7 @@ impl File {
         mod_dev_dbg!(
             device,
             "[File {}]: IOCTL: gem_mmap_offset handle={:#x?}",
-            file.inner().id,
+            file.id,
             data.handle
         );
 
@@ -237,7 +237,7 @@ impl File {
         mod_dev_dbg!(
             device,
             "[File {} VM {}]: IOCTL: gem_bind handle={:#x?} flags={:#x?} {:#x?}:{:#x?} -> {:#x?}",
-            file.inner().id,
+            file.id,
             data.vm_id,
             data.handle,
             data.flags,
@@ -403,7 +403,7 @@ impl File {
             dev_info!(
                 device,
                 "[File {} Queue {}]: IOCTL: submit failed! (submission ID: {} err: {:?})",
-                file.inner().id,
+                file.id,
                 data.queue_id,
                 id,
                 e
