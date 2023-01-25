@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-only OR MIT
-#![allow(missing_docs)]
 #![recursion_limit = "1024"]
 
 //! Driver for the Apple AGX GPUs found in Apple Silicon SoCs.
