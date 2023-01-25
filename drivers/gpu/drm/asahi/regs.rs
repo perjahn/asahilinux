@@ -1,13 +1,19 @@
 // SPDX-License-Identifier: GPL-2.0-only OR MIT
-#![allow(missing_docs)]
-#![allow(dead_code)]
 
-//! Driver for the Apple AGX GPUs found in Apple Silicon SoCs.
+//! GPU MMIO register abstraction
+//!
+//! Since the vast majority of the interactions with the GPU are brokered through the firmware,
+//! there is very little need to interact directly with GPU MMIO register. This module abstracts
+//! the few operations that require that, mainly reading the MMU fault status, reading GPU ID
+//! information, and starting the GPU firmware coprocessor.
 
 use crate::hw;
 use kernel::{device, io_mem::IoMem, platform, prelude::*};
 
+/// Size of the ASC control MMIO region.
 pub(crate) const ASC_CTL_SIZE: usize = 0x4000;
+
+/// Size of the SGX MMIO region.
 pub(crate) const SGX_SIZE: usize = 0x1000000;
 
 const CPU_CONTROL: usize = 0x44;
@@ -25,30 +31,41 @@ const ID_CLUSTERS: usize = 0xd0401c;
 const CORE_MASK_0: usize = 0xd01500;
 const CORE_MASK_1: usize = 0xd01514;
 
+/// Enum representing the unit that caused an MMU fault.
 #[allow(non_camel_case_types)]
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub(crate) enum FaultUnit {
+    /// Decompress / pixel fetch
     DCMP(u8),
+    /// USC L1 Cache (device loads/stores)
     UL1C(u8),
+    /// Compress / pixel store
     CMP(u8),
     GSL1(u8),
     IAP(u8),
     VCE(u8),
+    /// Tiling Engine
     TE(u8),
     RAS(u8),
+    /// Vertex Data Master
     VDM(u8),
     PPP(u8),
+    /// ISP Parameter Fetch
     IPF(u8),
     IPF_CPF(u8),
     VF(u8),
     VF_CPF(u8),
+    /// Depth/Stencil load/store
     ZLS(u8),
 
+    /// Parameter Management
     dPM,
+    /// Compute Data Master
     dCDM_KS(u8),
     dIPP,
     dIPP_CS,
+    // Vertex Data Master
     dVDM_CSD,
     dVDM_SSD,
     dVDM_ILF,
@@ -57,15 +74,19 @@ pub(crate) enum FaultUnit {
     FC,
     GSL2,
 
+    /// Graphics L2 Cache Control?
     GL2CC_META(u8),
     GL2CC_MB,
 
+    /// Parameter Management
     gPM_SP(u8),
+    /// Vertex Data Master - CSD
     gVDM_CSD_SP(u8),
     gVDM_SSD_SP(u8),
     gVDM_ILF_SP(u8),
     gVDM_TFP_SP(u8),
     gVDM_MMB_SP(u8),
+    /// Compute Data Master
     gCDM_CS_KS0_SP(u8),
     gCDM_CS_KS1_SP(u8),
     gCDM_CS_KS2_SP(u8),
@@ -80,6 +101,7 @@ pub(crate) enum FaultUnit {
     Unknown(u8),
 }
 
+/// Reason for an MMU fault.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub(crate) enum FaultReason {
     Unmapped,
@@ -90,6 +112,7 @@ pub(crate) enum FaultReason {
     Unknown(u8),
 }
 
+/// Collection of information about an MMU fault.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub(crate) struct FaultInfo {
     pub(crate) address: u64,
@@ -102,6 +125,7 @@ pub(crate) struct FaultInfo {
     pub(crate) reason: FaultReason,
 }
 
+/// Device resources for this GPU instance.
 pub(crate) struct Resources {
     dev: device::Device,
     asc: IoMem<ASC_CTL_SIZE>,
@@ -109,6 +133,7 @@ pub(crate) struct Resources {
 }
 
 impl Resources {
+    /// Map the required resources given our platform device.
     pub(crate) fn new(pdev: &mut platform::Device) -> Result<Resources> {
         // TODO: add device abstraction to ioremap by name
         let asc_res = unsafe { pdev.ioremap_resource(0)? };
@@ -126,24 +151,30 @@ impl Resources {
         self.sgx.readl_relaxed(off)
     }
 
+    /* Not yet used
     fn sgx_write32(&self, off: usize, val: u32) {
         self.sgx.writel_relaxed(val, off)
     }
+    */
 
     fn sgx_read64(&self, off: usize) -> u64 {
         self.sgx.readq_relaxed(off)
     }
 
+    /* Not yet used
     fn sgx_write64(&self, off: usize, val: u64) {
         self.sgx.writeq_relaxed(val, off)
     }
+    */
 
+    /// Initialize the MMIO registers for the GPU.
     pub(crate) fn init_mmio(&self) -> Result {
         // Nothing to do for now...
 
         Ok(())
     }
 
+    /// Start the ASC coprocessor CPU.
     pub(crate) fn start_cpu(&self) -> Result {
         let val = self.asc.readl_relaxed(CPU_CONTROL);
 
@@ -152,6 +183,9 @@ impl Resources {
         Ok(())
     }
 
+    /// Get the GPU identification info from registers.
+    ///
+    /// See [`hw::GpuIdConfig`] for the result.
     pub(crate) fn get_gpu_id(&self) -> Result<hw::GpuIdConfig> {
         let id_version = self.sgx_read32(ID_VERSION);
         let id_unk08 = self.sgx_read32(ID_UNK08);
@@ -262,6 +296,7 @@ impl Resources {
         })
     }
 
+    /// Get the fault information from the MMU status register, if one occurred.
     pub(crate) fn get_fault_info(&self) -> Option<FaultInfo> {
         let fault_info = self.sgx_read64(FAULT_INFO);
 
