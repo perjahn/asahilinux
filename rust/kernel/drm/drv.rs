@@ -277,6 +277,7 @@ impl<T: Driver> Registration<T> {
         this.fops.owner = module.0;
         this.vtable.fops = &this.fops;
 
+        // SAFETY: The device is now initialized and ready to be registered.
         let ret = unsafe { bindings::drm_dev_register(this.drm.raw_mut(), flags as u64) };
         if ret < 0 {
             // SAFETY: `data_pointer` was returned by `into_pointer` above.
@@ -288,6 +289,7 @@ impl<T: Driver> Registration<T> {
         Ok(())
     }
 
+    /// Returns a reference to the `Device` instance for this registration.
     pub fn device(&self) -> &drm::device::Device<T> {
         &self.drm
     }
