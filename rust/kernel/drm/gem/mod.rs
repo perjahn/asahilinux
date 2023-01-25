@@ -192,8 +192,8 @@ impl<T: IntoGEMObject> BaseObject for T {}
 #[repr(C)]
 pub struct Object<T: DriverObject> {
     obj: bindings::drm_gem_object,
-    // The DRM core ensures the Device exists as long as its objects exist,
-    // so we don't need to manage the reference count here.
+    // The DRM core ensures the Device exists as long as its objects exist, so we don't need to
+    // manage the reference count here.
     dev: ManuallyDrop<device::Device<T::Driver>>,
     inner: T,
 }
