@@ -189,7 +189,9 @@ impl<A: AllocInner<T>, T> Allocator<A, T> {
         Ok(Pin::from(mm_node))
     }
 
-    #[allow(clippy::too_many_arguments)]
+    /// Insert a node into the allocator at a fixed start address.
+    ///
+    /// `node` is the user `T` type data to store into the node.
     pub fn reserve_node(
         &mut self,
         node: T,
