@@ -193,6 +193,7 @@ impl<T: IntoGEMObject> BaseObject for T {
 
     /// Creates an mmap offset to map the object from userspace.
     fn create_mmap_offset(&self) -> Result<u64> {
+        // SAFETY: The arguments are valid per the type invariant.
         to_result(unsafe {
             // TODO: is this threadsafe?
             bindings::drm_gem_create_mmap_offset(self.gem_obj() as *const _ as *mut _)
