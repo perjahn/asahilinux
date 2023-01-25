@@ -620,7 +620,7 @@ impl HeapAllocator {
             total_garbage: 0,
         };
 
-        let mm = mm::Allocator::new(start as u64, (end - start + 1) as u64, inner)?;
+        let mm = mm::Allocator::new(start, end - start + 1, inner)?;
 
         Ok(HeapAllocator {
             dev: dev.clone(),
