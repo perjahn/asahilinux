@@ -304,7 +304,7 @@ impl file::Queue for ComputeQueue::ver {
                     #[ver(G == G14 && V < V13_0B4)]
                     unk_5c_g14: U64(0),
                     restart_branch_offset: off,
-                    unk_60: if unk3 { 1 } else { 0 },
+                    unk_60: unk3.into(),
                     #[ver(V >= V13_0B4)]
                     unk_64: Default::default(),
                     #[ver(V >= V13_0B4)]
@@ -386,7 +386,7 @@ impl file::Queue for ComputeQueue::ver {
                             stamp_value: next_stamp,
                             stamp_slot: batches.event().slot(),
                             evctl_index: 0, // fixed
-                            unk_24: if unk0 { 1 } else { 0 },
+                            unk_24: unk0.into(),
                             uuid: uuid,
                             prev_stamp_value: 0,
                         },
