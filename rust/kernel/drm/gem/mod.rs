@@ -5,7 +5,7 @@
 //!
 //! C header: [`include/linux/drm/drm_gem.h`](../../../../include/linux/drm/drm_gem.h)
 
-#[cfg(CONFIG_DRM_GEM_SHMEM_HELPER)]
+#[cfg(CONFIG_DRM_GEM_SHMEM_HELPER = "y")]
 pub mod shmem;
 
 use alloc::boxed::Box;
