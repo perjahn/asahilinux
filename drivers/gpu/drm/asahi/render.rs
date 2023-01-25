@@ -808,7 +808,7 @@ impl file::Queue for RenderQueue::ver {
                             stamp_value: next_frag,
                             stamp_slot: batches_frag.event().slot(),
                             evctl_index: 0, // fixed
-                            unk_24: if unk0 { 1 } else { 0 },
+                            unk_24: unk0.into(),
                             uuid: uuid_3d,
                             prev_stamp_value: batches_frag.event_value().counter(),
                         },
@@ -1111,7 +1111,7 @@ impl file::Queue for RenderQueue::ver {
                             stamp_value: next_vtx,
                             stamp_slot: batches_vtx.event().slot(),
                             evctl_index: 0, // fixed
-                            unk_24: if unk0 { 1 } else { 0 },
+                            unk_24: unk0.into(),
                             uuid: uuid_ta,
                             prev_stamp_value: batches_vtx.event_value().counter(),
                         },
