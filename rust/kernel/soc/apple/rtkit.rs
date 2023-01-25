@@ -155,7 +155,7 @@ unsafe extern "C" fn shmem_destroy_callback<T: Operations>(
     // Per shmem_setup_callback, this has to be a pointer to a Buffer if it is set
     if !bfr_mut.private.is_null() {
         unsafe {
-            Box::from_raw(bfr_mut.private as *mut T::Buffer);
+            core::mem::drop(Box::from_raw(bfr_mut.private as *mut T::Buffer));
         }
         bfr_mut.private = core::ptr::null_mut();
     }
