@@ -972,7 +972,7 @@ impl Uat {
     pub(crate) fn ttb_base(&self) -> u64 {
         let inner = self.inner.lock();
 
-        inner.ttbs_rgn.base as u64
+        inner.ttbs_rgn.base
     }
 
     pub(crate) fn bind(&self, vm: &Vm) -> Result<VmBind> {
