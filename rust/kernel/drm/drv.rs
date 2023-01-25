@@ -134,7 +134,7 @@ pub trait Driver {
 
     /// The type used to manage memory for this driver.
     ///
-    /// Should be either drm::gem::Object<T> or drm::gem::shmem::Object<T>
+    /// Should be either `drm::gem::Object<T>` or `drm::gem::shmem::Object<T>`.
     type Object: AllocImpl;
 
     /// The type used to represent a DRM File (client)
@@ -195,6 +195,17 @@ macro_rules! drm_legacy_fields {
     }
 }
 
+/// Registers a DRM device with the rest of the kernel.
+///
+/// It automatically picks up THIS_MODULE.
+#[allow(clippy::crate_in_macro_def)]
+#[macro_export]
+macro_rules! drm_device_register {
+    ($reg:expr, $data:expr, $flags:expr $(,)?) => {{
+        $crate::drm::drv::Registration::register($reg, $data, $flags, &crate::THIS_MODULE)
+    }};
+}
+
 impl<T: Driver> Registration<T> {
     const VTABLE: bindings::drm_driver = drm_legacy_fields! {
         load: None,
@@ -253,7 +264,7 @@ impl<T: Driver> Registration<T> {
 
     /// Registers a DRM device with the rest of the kernel.
     ///
-    /// Users are encouraged to use the [`drm_device_register`] macro because it automatically
+    /// Users are encouraged to use the [`drm_device_register!()`] macro because it automatically
     /// picks up the current module.
     pub fn register(
         self: Pin<&mut Self>,
