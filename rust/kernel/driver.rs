@@ -356,6 +356,11 @@ macro_rules! second_item {
 /// define_id_array!(A6, Id, &'static [u8], [(Id(10), None), (Id(20), Some(b"id2")), ]);
 /// define_id_array!(A7, Id, &'static [u8], [(Id(10), Some(b"id1")), (Id(20), None), ]);
 /// define_id_array!(A8, Id, &'static [u8], [(Id(10), None), (Id(20), None), ]);
+///
+/// // Within a bus driver:
+/// driver_id_table!(BUS_ID_TABLE, Id, &'static [u8], A1);
+/// // At the top level:
+/// module_id_table!(MODULE_ID_TABLE, "mybus", Id, A1);
 /// ```
 #[macro_export]
 macro_rules! define_id_array {
@@ -367,7 +372,7 @@ macro_rules! define_id_array {
     };
 }
 
-/// Defines a new constant [`IdTable`] with a concise syntax.
+/// Declares an [`IdArray`] as an [`IdTable`] for a bus driver with a concise syntax.
 ///
 /// It is meant to be used by buses and subsystems to create a similar macro with their device id
 /// type already specified, i.e., with fewer parameters to the end user.
