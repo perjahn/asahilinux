@@ -1,15 +1,31 @@
 // SPDX-License-Identifier: GPL-2.0-only OR MIT
-#![allow(missing_docs)]
-#![allow(unused_imports)]
-#![allow(dead_code)]
 
 //! Basic soft floating-point support
 //!
-//! Makes no attempt to be IEEE754 compliant, but good enough.
+//! The GPU firmware requires a large number of power-related configuration values, many of which
+//! are IEEE 754 32-bit floating point values. These values change not only between GPU/SoC
+//! variants, but also between specific hardware platforms using these SoCs, so they must be
+//! derived from device tree properties. There are many redundant values computed from the same
+//! inputs with simple add/sub/mul/div calculations, plus a few values that are actually specific
+//! to each individual device depending on its binning and fused voltage configuration, so it
+//! doesn't make sense to store the final values to be passed to the firmware in the device tree.
+//!
+//! Therefore, we need a way to perform floating-point calculations in the kernel.
+//!
+//! Using the actual FPU from kernel mode is asking for trouble, since there is no way to bound
+//! the execution of FPU instructions to a controlled section of code without outright putting it
+//! in its own compilation unit, which is quite painful for Rust. Since these calculations only
+//! have to happen at initialization time and there is no need for performance, let's use a simple
+//! software float implementation instead.
+//!
+//! This implementation makes no attempt to be fully IEEE754 compliant, but it's good enough and
+//! gives bit-identical results to macOS in the vast majority of cases, with one or two exceptions
+//! related to slightly non-compliant rounding.
 
 use core::ops;
 use kernel::{of, prelude::*};
 
+/// An IEEE754-compatible floating point number implemented in software.
 #[derive(Default, Debug, Copy, Clone)]
 pub(crate) struct F32(u32);
 
@@ -21,12 +37,24 @@ struct F32U {
 }
 
 impl F32 {
+    /// Convert a raw 32-bit representation into an F32
     pub(crate) const fn from_bits(u: u32) -> F32 {
         F32(u)
     }
+
+    // Convert a `f32` value into an F32
+    //
+    // This must ONLY be used in const context. Use the `f32!{}` macro to do it safely.
+    #[doc(hidden)]
     pub(crate) const fn from_f32(v: f32) -> F32 {
         F32(unsafe { core::mem::transmute(v) })
     }
+
+    // Convert an F32 into a `f32` value
+    //
+    // For testing only.
+    #[doc(hidden)]
+    #[cfg(test)]
     pub(crate) fn to_f32(self) -> f32 {
         f32::from_bits(self.0)
     }
@@ -41,6 +69,10 @@ impl F32 {
     }
 }
 
+/// Safely construct an `F32` out of a constant floating-point value.
+///
+/// This ensures that the conversion happens in const context, so no floating point operations are
+/// emitted.
 #[macro_export]
 macro_rules! f32 {
     ([$($val:expr),*]) => {{
@@ -268,6 +300,7 @@ impl of::PropertyUnit for F32 {
     }
 }
 
+// TODO: Make this an actual test and figure out how to make it run.
 #[cfg(test)]
 mod tests {
     #[test]
