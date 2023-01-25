@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0-only OR MIT
-#![allow(missing_docs)]
-#![allow(unused_imports)]
-#![allow(dead_code)]
 
-//! TLBI instruction helpers
+//! ARM64 low level memory operations.
+//!
+//! This GPU uses CPU-side `tlbi` outer-shareable instructions to manage its TLBs.
+//! Yes, really. Even though the VA address spaces are unrelated.
+//!
+//! Right now we pick our own ASIDs and don't coordinate with the CPU. This might result
+//! in needless TLB shootdowns on the CPU side... TODO: fix this.
 
 use core::arch::asm;
 use core::cmp::min;
@@ -13,6 +16,7 @@ use crate::mmu;
 
 type Asid = u8;
 
+/// Invalidate the entire GPU TLB.
 #[inline(always)]
 pub(crate) fn tlbi_all() {
     unsafe {
@@ -20,6 +24,7 @@ pub(crate) fn tlbi_all() {
     }
 }
 
+/// Invalidate all TLB entries for a given ASID.
 #[inline(always)]
 pub(crate) fn tlbi_asid(asid: Asid) {
     if debug_enabled(DebugFlags::ConservativeTlbi) {
@@ -37,6 +42,7 @@ pub(crate) fn tlbi_asid(asid: Asid) {
     }
 }
 
+/// Invalidate a single page for a given ASID.
 #[inline(always)]
 pub(crate) fn tlbi_page(asid: Asid, va: usize) {
     if debug_enabled(DebugFlags::ConservativeTlbi) {
@@ -55,6 +61,7 @@ pub(crate) fn tlbi_page(asid: Asid, va: usize) {
     }
 }
 
+/// Invalidate a range of pages for a given ASID.
 #[inline(always)]
 pub(crate) fn tlbi_range(asid: Asid, va: usize, len: usize) {
     if debug_enabled(DebugFlags::ConservativeTlbi) {
@@ -117,6 +124,7 @@ pub(crate) fn tlbi_range(asid: Asid, va: usize, len: usize) {
     }
 }
 
+/// Issue a memory barrier (`dsb sy`).
 #[inline(always)]
 pub(crate) fn sync() {
     unsafe {
