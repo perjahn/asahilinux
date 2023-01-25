@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: GPL-2.0-only OR MIT
-#![allow(missing_docs)]
-#![allow(unused_imports)]
 #![allow(dead_code)]
 
-//! Debug enable/disable flags
+//! Debug enable/disable flags and convenience macros
 
+#[allow(unused_imports)]
 pub(crate) use super::{cls_dev_dbg, cls_pr_debug, debug, mod_dev_dbg, mod_pr_debug};
 use core::sync::atomic::{AtomicU64, Ordering};
 
 static DEBUG_FLAGS: AtomicU64 = AtomicU64::new(0);
 
+/// Debug flag bit indices
 pub(crate) enum DebugFlags {
     // 0-3: Memory-related debug
     Mmu = 0,
@@ -66,6 +66,7 @@ pub(crate) enum DebugFlags {
     Debug7 = 55,
 }
 
+/// Update the cached global debug flags from the module parameter
 pub(crate) fn update_debug_flags() {
     let flags = {
         let lock = crate::THIS_MODULE.kernel_param_lock();
@@ -75,11 +76,13 @@ pub(crate) fn update_debug_flags() {
     DEBUG_FLAGS.store(flags, Ordering::Relaxed);
 }
 
+/// Check whether debug is enabled for a given flag
 #[inline(always)]
 pub(crate) fn debug_enabled(flag: DebugFlags) -> bool {
     DEBUG_FLAGS.load(Ordering::Relaxed) & 1 << (flag as usize) != 0
 }
 
+/// Run some code only if debug is enabled for the calling module
 #[macro_export]
 macro_rules! debug {
     ($($arg:tt)*) => {
@@ -89,6 +92,7 @@ macro_rules! debug {
     };
 }
 
+/// pr_info!() if debug is enabled for the calling module
 #[macro_export]
 macro_rules! mod_pr_debug (
     ($($arg:tt)*) => (
@@ -96,6 +100,7 @@ macro_rules! mod_pr_debug (
     )
 );
 
+/// dev_info!() if debug is enabled for the calling module
 #[macro_export]
 macro_rules! mod_dev_dbg (
     ($($arg:tt)*) => (
@@ -103,6 +108,7 @@ macro_rules! mod_dev_dbg (
     )
 );
 
+/// pr_info!() if debug is enabled for a specific module
 #[macro_export]
 macro_rules! cls_pr_debug (
     ($cls:ident, $($arg:tt)*) => (
@@ -112,6 +118,7 @@ macro_rules! cls_pr_debug (
     )
 );
 
+/// dev_info!() if debug is enabled for a specific module
 #[macro_export]
 macro_rules! cls_dev_dbg (
     ($cls:ident, $($arg:tt)*) => (
