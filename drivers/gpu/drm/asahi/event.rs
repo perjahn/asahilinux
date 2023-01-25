@@ -1,54 +1,64 @@
 // SPDX-License-Identifier: GPL-2.0-only OR MIT
-#![allow(missing_docs)]
-#![allow(unused_imports)]
-#![allow(dead_code)]
 
-//! Asahi ring buffer channels
+//! GPU event manager
+//!
+//! The GPU firmware manages work completion by using event objects (Apple calls them "stamps"),
+//! which are monotonically incrementing counters. There are a fixed number of objects, and
+//! they are managed with a `SlotAllocator`.
+//!
+//! This module manages the set of available events and lets users compute expected values.
+//! It also manages signaling owners when the GPU firmware reports that an event fired.
 
 use crate::debug::*;
-use crate::fw::event::*;
-use crate::fw::initdata::raw;
 use crate::fw::types::*;
 use crate::{gpu, slotalloc, workqueue};
 use core::cmp;
 use core::sync::atomic::Ordering;
+use kernel::prelude::*;
 use kernel::sync::Arc;
-use kernel::{dbg, prelude::*};
 
 const DEBUG_CLASS: DebugFlags = DebugFlags::Event;
 
+/// Number of events managed by the firmware.
 const NUM_EVENTS: u32 = 128;
 
+/// Inner data associated with a given event slot.
 pub(crate) struct EventInner {
+    /// CPU pointer to the driver notification event stamp
     stamp: *const AtomicU32,
+    /// GPU pointer to the driver notification event stamp
     gpu_stamp: GpuWeakPointer<Stamp>,
+    /// GPU pointer to the firmware-internal event stamp
     gpu_fw_stamp: GpuWeakPointer<FwStamp>,
 }
 
+/// Alias for an event token, which allows requesting the same event.
 pub(crate) type Token = slotalloc::SlotToken;
+/// Alias for an allocated `Event` that has a slot.
 pub(crate) type Event = slotalloc::Guard<EventInner>;
 
+/// Represents a given stamp value for an event.
 #[derive(Eq, PartialEq, Copy, Clone, Debug)]
 #[repr(transparent)]
 pub(crate) struct EventValue(u32);
 
 impl EventValue {
-    pub(crate) fn stamp(&self) -> u32 {
-        self.0
-    }
-
+    /// Returns the counter portion of the value.
     pub(crate) fn counter(&self) -> u32 {
         self.0 >> 8
     }
 
+    /// Returns the `EventValue` that succeeds this one.
     pub(crate) fn next(&self) -> EventValue {
         EventValue(self.0.wrapping_add(0x100))
     }
 
+    /// Increments this `EventValue` in place.
     pub(crate) fn increment(&mut self) {
         self.0 = self.0.wrapping_add(0x100);
     }
 
+    /// Computes the delta between this event and another event.
     pub(crate) fn delta(&self, other: &EventValue) -> i32 {
         self.0.wrapping_sub(other.0) as i32
     }
@@ -67,14 +77,17 @@ impl Ord for EventValue {
 }
 
 impl EventInner {
+    /// Returns the GPU pointer to the driver notification stamp
     pub(crate) fn stamp_pointer(&self) -> GpuWeakPointer<Stamp> {
         self.gpu_stamp
     }
 
+    /// Returns the GPU pointer to the firmware internal stamp
     pub(crate) fn fw_stamp_pointer(&self) -> GpuWeakPointer<FwStamp> {
         self.gpu_fw_stamp
     }
 
+    /// Fetches the current event value from shared memory
     pub(crate) fn current(&self) -> EventValue {
         // SAFETY: The pointer is always valid as constructed in
         // EventManager below, and outside users cannot construct
@@ -95,17 +108,21 @@ impl slotalloc::SlotItem for EventInner {
     }
 }
 
+/// Inner data for the event manager, to be protected by the SlotAllocator lock.
 pub(crate) struct EventManagerInner {
     stamps: GpuArray<Stamp>,
     fw_stamps: GpuArray<FwStamp>,
+    // Note: Use dyn to avoid having to version this entire module.
     owners: Vec<Option<Arc<dyn workqueue::WorkQueue>>>,
 }
 
+/// Top-level EventManager object.
 pub(crate) struct EventManager {
     alloc: slotalloc::SlotAllocator<EventInner>,
 }
 
 impl EventManager {
+    /// Create a new EventManager.
     #[inline(never)]
     pub(crate) fn new(alloc: &mut gpu::KernelAllocators) -> Result<EventManager> {
         let mut owners = Vec::new();
@@ -131,6 +148,7 @@ impl EventManager {
         })
     }
 
+    /// Gets a free `Event`, optionally trying to reuse the last one allocated by this caller.
     pub(crate) fn get(
         &self,
         token: Option<Token>,
@@ -148,6 +166,7 @@ impl EventManager {
         Ok(ev)
     }
 
+    /// Signals an event by slot, indicating completion (of one or more commands).
     pub(crate) fn signal(&self, slot: u32) {
         match self
             .alloc
@@ -162,6 +181,7 @@ impl EventManager {
         }
     }
 
+    /// Marks the owner of an event as having lost its work due to a GPU error.
     pub(crate) fn mark_error(&self, slot: u32, wait_value: u32, error: workqueue::BatchError) {
         match self
             .alloc
@@ -177,5 +197,6 @@ impl EventManager {
     }
 }
 
+// SAFETY: All methods are thread-safe.
 unsafe impl Send for EventManager {}
 unsafe impl Sync for EventManager {}
