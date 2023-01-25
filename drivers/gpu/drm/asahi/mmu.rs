@@ -954,7 +954,7 @@ impl Uat {
             }
             Some(map) => Ok(UatRegion {
                 base: res.start,
-                size: rgn_size as usize,
+                size: rgn_size,
                 map,
             }),
         }
