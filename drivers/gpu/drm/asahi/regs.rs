@@ -303,7 +303,7 @@ impl Resources {
             0xac => FaultUnit::dRDE(1),
             0xad => FaultUnit::FC,
             0xae => FaultUnit::GSL2,
-            0xb0..=0xb7 => FaultUnit::GL2CC_META((unit_code & 0xf) as u8),
+            0xb0..=0xb7 => FaultUnit::GL2CC_META(unit_code & 0xf),
             0xb8 => FaultUnit::GL2CC_MB,
             0xe0..=0xff => match unit_code & 0xf {
                 0x0 => FaultUnit::gPM_SP((unit_code >> 4) & 1),
