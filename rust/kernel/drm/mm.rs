@@ -18,16 +18,24 @@ use core::{
     pin::Pin,
 };
 
+/// Type alias representing a DRM MM node.
 pub type Node<A, T> = Pin<Box<NodeData<A, T>>>;
 
+/// Trait which must be implemented by the inner allocator state type provided by the user.
 pub trait AllocInner<T> {
+    /// Notification that a node was dropped from the allocator.
     fn drop_object(&mut self, _start: u64, _size: u64, _color: usize, _object: &mut T) {}
 }
 
 impl<T> AllocInner<T> for () {}
 
+/// Wrapper type for a `struct drm_mm` plus user AllocInner object.
+///
+/// # Invariants
+/// The `drm_mm` struct is valid and initialized.
 struct MmInner<A: AllocInner<T>, T>(Opaque<bindings::drm_mm>, A, PhantomData<T>);
 
+/// Represents a single allocated node in the MM allocator
 pub struct NodeData<A: AllocInner<T>, T> {
     node: bindings::drm_mm_node,
     mm: Arc<Mutex<MmInner<A, T>>>,
