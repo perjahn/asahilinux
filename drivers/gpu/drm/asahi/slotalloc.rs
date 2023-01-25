@@ -1,9 +1,19 @@
 // SPDX-License-Identifier: GPL-2.0-only OR MIT
-#![allow(missing_docs)]
-#![allow(unused_imports)]
-#![allow(dead_code)]
 
 //! Generic slot allocator
+//!
+//! This is a simple allocator to manage fixed-size pools of GPU resources that are transiently
+//! required during command execution. Each item resides in a "slot" at a given index. Users borrow
+//! and return free items from the available pool.
+//!
+//! Allocations are "sticky", and return a token that callers can use to request the same slot
+//! again later. This allows slots to be lazily invalidated, so that multiple uses by the same user
+//! avoid any actual cleanup work.
+//!
+//! The allocation policy is currently a simple LRU mechanism, doing a full linear scan over the
+//! slots when no token was previously provided. This is probably good enough, since in the absence
+//! of serious system contention most allocation requests will be immediately fulfilled from the
+//! previous slot without doing an LRU scan.
 
 use core::ops::{Deref, DerefMut};
 use kernel::{
@@ -12,12 +22,17 @@ use kernel::{
     sync::{Arc, CondVar, Mutex, UniqueArc},
 };
 
+/// Trait representing a single item within a slot.
 pub(crate) trait SlotItem {
+    /// Arbitrary user data associated with the SlotAllocator.
     type Data;
 
+    /// Called eagerly when this item is released back into the available pool.
     fn release(&mut self, _data: &mut Self::Data, _slot: u32) {}
 }
 
+/// Represents a current or previous allocation of an item from a slot. Users keep `SlotToken`s
+/// around across allocations to request that, if possible, the same slot be reused.
 #[derive(Copy, Clone, Debug)]
 pub(crate) struct SlotToken {
     time: u64,
@@ -25,11 +40,13 @@ pub(crate) struct SlotToken {
 }
 
 impl SlotToken {
+    /// Returns the slot index that this token represents a past assignment to.
     pub(crate) fn last_slot(&self) -> u32 {
         self.slot
     }
 }
 
+/// A guard representing active ownership of a slot.
 pub(crate) struct Guard<T: SlotItem> {
     item: Option<T>,
     changed: bool,
@@ -38,14 +55,20 @@ pub(crate) struct Guard<T: SlotItem> {
 }
 
 impl<T: SlotItem> Guard<T> {
+    /// Returns the active slot owned by this `Guard`.
     pub(crate) fn slot(&self) -> u32 {
         self.token.slot
     }
 
+    /// Returns `true` if the slot changed since the last allocation (or no `SlotToken` was
+    /// provided), or `false` if the previously allocated slot was successfully re-acquired with
+    /// no other users in the interim.
     pub(crate) fn changed(&self) -> bool {
         self.changed
     }
 
+    /// Returns a `SlotToken` that can be used to re-request the same slot at a later time, after
+    /// this `Guard` is dropped.
     pub(crate) fn token(&self) -> SlotToken {
         self.token
     }
@@ -65,12 +88,14 @@ impl<T: SlotItem> DerefMut for Guard<T> {
     }
 }
 
+/// A slot item that is currently free.
 struct Entry<T: SlotItem> {
     item: T,
     get_time: u64,
     drop_time: u64,
 }
 
+/// Inner data for the `SlotAllocator`, protected by a `Mutex`.
 struct SlotAllocatorInner<T: SlotItem> {
     data: T::Data,
     slots: Vec<Option<Entry<T>>>,
@@ -78,14 +103,21 @@ struct SlotAllocatorInner<T: SlotItem> {
     drop_count: u64,
 }
 
+/// A single slot allocator instance.
 struct SlotAllocatorOuter<T: SlotItem> {
     inner: Mutex<SlotAllocatorInner<T>>,
     cond: CondVar,
 }
 
+/// A shared reference to a slot allocator instance.
 pub(crate) struct SlotAllocator<T: SlotItem>(Arc<SlotAllocatorOuter<T>>);
 
 impl<T: SlotItem> SlotAllocator<T> {
+    /// Creates a new `SlotAllocator`, with a fixed number of slots and arbitrary associated data.
+    ///
+    /// The caller provides a constructor callback which takes a reference to the `T::Data` and
+    /// creates a single slot. This is called during construction to create all the initial
+    /// items, which then live the lifetime of the `SlotAllocator`.
     pub(crate) fn new(
         num_slots: u32,
         mut data: T::Data,
@@ -128,15 +160,27 @@ impl<T: SlotItem> SlotAllocator<T> {
         Ok(SlotAllocator(alloc.into()))
     }
 
+    /// Calls a callback on the inner data associated with this allocator, taking the lock.
     pub(crate) fn with_inner<RetVal>(&self, cb: impl FnOnce(&mut T::Data) -> RetVal) -> RetVal {
         let mut inner = self.0.inner.lock();
         cb(&mut inner.data)
     }
 
+    /// Gets a fresh slot, optionally reusing a previous allocation if a `SlotToken` is provided.
+    ///
+    /// Blocks if no slots are free.
     pub(crate) fn get(&self, token: Option<SlotToken>) -> Result<Guard<T>> {
         self.get_inner(token, |_a, _b| Ok(()))
     }
 
+    /// Gets a fresh slot, optionally reusing a previous allocation if a `SlotToken` is provided.
+    ///
+    /// Blocks if no slots are free.
+    ///
+    /// This version allows the caller to pass in a callback that gets a mutable reference to the
+    /// user data for the allocator and the freshly acquired slot, which is called before the
+    /// allocator lock is released. This can be used to perform bookkeeping associated with
+    /// specific slots (such as tracking their current owner).
     pub(crate) fn get_inner(
         &self,
         token: Option<SlotToken>,
