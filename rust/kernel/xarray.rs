@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0
-#![allow(missing_docs)]
 
 //! XArray abstraction.
 //!
@@ -30,6 +29,10 @@ pub mod flags {
 }
 
 /// Wrapper for a value owned by the `XArray` which holds the `XArray` lock until dropped.
+///
+/// # Invariants
+///
+/// The `*mut T` is always non-NULL and owned by the referenced `XArray`
 pub struct Guard<'a, T: PointerWrapper>(*mut T, &'a Opaque<bindings::xarray>);
 
 impl<'a, T: PointerWrapper> Guard<'a, T> {
@@ -92,7 +95,7 @@ impl<'a, T: PointerWrapper> Reservation<'a, T> {
 
     /// Returns the index of this reservation.
     pub fn index(&self) -> usize {
-        self.1 as usize
+        self.1
     }
 }
 
@@ -112,7 +115,6 @@ impl<'a, T: PointerWrapper> Drop for Reservation<'a, T> {
 /// This structure is expected to often be used with an inner type that can either be efficiently
 /// cloned, such as an `Arc<T>`.
 pub struct XArray<T: PointerWrapper> {
-    // Invariant: this opaque `struct xarray` is always valid.
     xa: Opaque<bindings::xarray>,
     _p: PhantomData<T>,
 }
@@ -122,12 +124,13 @@ impl<T: PointerWrapper> XArray<T> {
     pub fn new(flags: Flags) -> Result<XArray<T>> {
         let xa = Opaque::uninit();
 
-        /// SAFETY: We have just created `xa`. This data structure does not require
-        /// pinning.
+        // SAFETY: We have just created `xa`. This data structure does not require
+        // pinning.
         unsafe {
             bindings::xa_init_flags(xa.get(), flags)
         };
 
+        // INVARIANT: Initialize the `XArray` with a valid `xa`.
         Ok(XArray {
             xa,
             _p: PhantomData,
