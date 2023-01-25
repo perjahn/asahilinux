@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0 OR MIT
-#![allow(missing_docs)]
 
 //! DRM MM range allocator
 //!
@@ -57,19 +56,28 @@ impl<A: AllocInner<T>, T> InnerRef<A, T> {
 }
 
 impl<A: AllocInner<T>, T> NodeData<A, T> {
+    /// Returns the color of the node (an opaque value)
     pub fn color(&self) -> usize {
         self.node.color as usize
     }
+
+    /// Returns the start address of the node
     pub fn start(&self) -> u64 {
         self.node.start
     }
+
+    /// Returns the size of the node in bytes
     pub fn size(&self) -> u64 {
         self.node.size
     }
+
+    /// Operate on the user `AllocInner<T>` implementation associated with this node's allocator.
     pub fn with_inner<RetVal>(&self, cb: impl FnOnce(&mut A) -> RetVal) -> RetVal {
         let mut l = self.mm.lock();
         cb(&mut l.1)
     }
+
+    /// Return a clonable, detached reference to the allocator inner data.
     pub fn inner_ref(&self) -> InnerRef<A, T> {
         InnerRef(self.mm.clone())
     }
