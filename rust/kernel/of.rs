@@ -306,9 +306,14 @@ impl<'a> Property<'a> {
     }
 }
 
+/// A trait that represents a value decodable from a property with a fixed unit size.
+///
+/// This allows us to auto-derive property decode implementations for `Vec<T: PropertyUnit>`.
 pub trait PropertyUnit: Sized {
+    /// The size in bytes of a single data unit.
     const UNIT_SIZE: usize;
 
+    /// Decode this data unit from a byte slice. The passed slice will have a length of `UNIT_SIZE`.
     fn from_bytes(data: &[u8]) -> Result<Self>;
 }
 
