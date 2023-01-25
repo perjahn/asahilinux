@@ -17,11 +17,10 @@ pub(crate) enum DebugFlags {
     Gem = 2,
     Object = 3,
 
-    // 4-7: Slots and firmware objects
-    SlotAlloc = 4,
-    Event = 5,
-    Buffer = 6,
-    WorkQueue = 7,
+    // 4-7: Firmware objects and resources
+    Event = 4,
+    Buffer = 5,
+    WorkQueue = 6,
 
     // 8-13: DRM interface, rendering, compute, GPU globals
     File = 8,

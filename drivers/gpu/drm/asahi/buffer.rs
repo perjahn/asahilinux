@@ -188,7 +188,7 @@ impl Scene::ver {
 pub(crate) struct SlotInner();
 
 impl slotalloc::SlotItem for SlotInner {
-    type Owner = ();
+    type Data = ();
 }
 
 pub(crate) struct BufferManager(slotalloc::SlotAllocator<SlotInner>);

@@ -5,7 +5,6 @@
 
 //! Generic slot allocator
 
-use crate::debug::*;
 use core::ops::{Deref, DerefMut};
 use kernel::{
     error::Result,
@@ -13,12 +12,10 @@ use kernel::{
     sync::{Arc, CondVar, Mutex, UniqueArc},
 };
 
-const DEBUG_CLASS: DebugFlags = DebugFlags::SlotAlloc;
-
 pub(crate) trait SlotItem {
-    type Owner;
+    type Data;
 
-    fn release(&mut self, _owner: &mut Self::Owner, _slot: u32) {}
+    fn release(&mut self, _data: &mut Self::Data, _slot: u32) {}
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -75,13 +72,13 @@ struct Entry<T: SlotItem> {
 }
 
 struct SlotAllocatorInner<T: SlotItem> {
-    owner: T::Owner,
+    data: T::Data,
     slots: Vec<Option<Entry<T>>>,
     get_count: u64,
     drop_count: u64,
 }
 
-pub(crate) struct SlotAllocatorOuter<T: SlotItem> {
+struct SlotAllocatorOuter<T: SlotItem> {
     inner: Mutex<SlotAllocatorInner<T>>,
     cond: CondVar,
 }
@@ -91,15 +88,15 @@ pub(crate) struct SlotAllocator<T: SlotItem>(Arc<SlotAllocatorOuter<T>>);
 impl<T: SlotItem> SlotAllocator<T> {
     pub(crate) fn new(
         num_slots: u32,
-        mut owner: T::Owner,
-        mut constructor: impl FnMut(&mut T::Owner, u32) -> T,
+        mut data: T::Data,
+        mut constructor: impl FnMut(&mut T::Data, u32) -> T,
     ) -> Result<SlotAllocator<T>> {
         let mut slots = Vec::try_with_capacity(num_slots as usize)?;
 
         for i in 0..num_slots {
             slots
                 .try_push(Some(Entry {
-                    item: constructor(&mut owner, i),
+                    item: constructor(&mut data, i),
                     get_time: 0,
                     drop_time: 0,
                 }))
@@ -107,7 +104,7 @@ impl<T: SlotItem> SlotAllocator<T> {
         }
 
         let inner = SlotAllocatorInner {
-            owner,
+            data,
             slots,
             get_count: 0,
             drop_count: 0,
@@ -131,9 +128,9 @@ impl<T: SlotItem> SlotAllocator<T> {
         Ok(SlotAllocator(alloc.into()))
     }
 
-    pub(crate) fn with_inner<RetVal>(&self, cb: impl FnOnce(&mut T::Owner) -> RetVal) -> RetVal {
+    pub(crate) fn with_inner<RetVal>(&self, cb: impl FnOnce(&mut T::Data) -> RetVal) -> RetVal {
         let mut inner = self.0.inner.lock();
-        cb(&mut inner.owner)
+        cb(&mut inner.data)
     }
 
     pub(crate) fn get(&self, token: Option<SlotToken>) -> Result<Guard<T>> {
@@ -143,7 +140,7 @@ impl<T: SlotItem> SlotAllocator<T> {
     pub(crate) fn get_inner(
         &self,
         token: Option<SlotToken>,
-        cb: impl FnOnce(&mut T::Owner, &mut Guard<T>) -> Result<()>,
+        cb: impl FnOnce(&mut T::Data, &mut Guard<T>) -> Result<()>,
     ) -> Result<Guard<T>> {
         let mut inner = self.0.inner.lock();
 
@@ -158,7 +155,7 @@ impl<T: SlotItem> SlotAllocator<T> {
                         changed: false,
                         alloc: self.0.clone(),
                     };
-                    cb(&mut inner.owner, &mut guard)?;
+                    cb(&mut inner.data, &mut guard)?;
                     return Ok(guard);
                 }
             }
@@ -208,7 +205,7 @@ impl<T: SlotItem> SlotAllocator<T> {
             alloc: self.0.clone(),
         };
 
-        cb(&mut inner.owner, &mut guard)?;
+        cb(&mut inner.data, &mut guard)?;
         Ok(guard)
     }
 }
@@ -231,7 +228,7 @@ impl<T: SlotItem> Drop for Guard<T> {
         } else {
             inner.drop_count += 1;
             let mut item = self.item.take().expect("Guard lost its item");
-            item.release(&mut inner.owner, self.token.slot);
+            item.release(&mut inner.data, self.token.slot);
             inner.slots[self.token.slot as usize] = Some(Entry {
                 item,
                 get_time: self.token.time,

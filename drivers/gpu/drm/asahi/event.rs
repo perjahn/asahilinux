@@ -86,11 +86,11 @@ impl EventInner {
 }
 
 impl slotalloc::SlotItem for EventInner {
-    type Owner = EventManagerInner;
+    type Data = EventManagerInner;
 
-    fn release(&mut self, owner: &mut Self::Owner, slot: u32) {
+    fn release(&mut self, data: &mut Self::Data, slot: u32) {
         mod_pr_debug!("EventManager: Released slot {}", slot);
-        owner.owners[slot as usize] = None;
+        data.owners[slot as usize] = None;
     }
 }
 

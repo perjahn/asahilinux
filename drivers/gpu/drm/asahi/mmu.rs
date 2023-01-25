@@ -249,7 +249,7 @@ no_debug!(Vm);
 pub(crate) struct SlotInner();
 
 impl slotalloc::SlotItem for SlotInner {
-    type Owner = ();
+    type Data = ();
 }
 
 #[derive(Debug)]
