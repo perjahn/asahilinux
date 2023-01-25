@@ -203,23 +203,20 @@ impl<T: IntoGEMObject> BaseObject for T {
     }
 }
 
-impl<T: DriverObject> private::Sealed for Object<T> {}
+impl<T: IntoGEMObject> BaseObject for T {}
 
-impl<T: DriverObject> drv::AllocImpl for Object<T> {
-    const ALLOC_OPS: drv::AllocOps = drv::AllocOps {
-        gem_create_object: None,
-        prime_handle_to_fd: Some(bindings::drm_gem_prime_handle_to_fd),
-        prime_fd_to_handle: Some(bindings::drm_gem_prime_fd_to_handle),
-        gem_prime_import: None,
-        gem_prime_import_sg_table: None,
-        gem_prime_mmap: Some(bindings::drm_gem_prime_mmap),
-        dumb_create: None,
-        dumb_map_offset: None,
-        dumb_destroy: None,
-    };
+/// A base GEM object.
+#[repr(C)]
+pub struct Object<T: DriverObject> {
+    obj: bindings::drm_gem_object,
+    // The DRM core ensures the Device exists as long as its objects exist,
+    // so we don't need to manage the reference count here.
+    dev: ManuallyDrop<device::Device<T::Driver>>,
+    inner: T,
 }
 
 impl<T: DriverObject> Object<T> {
+    /// The size of this object's structure.
     pub const SIZE: usize = mem::size_of::<Self>();
 
     const OBJECT_FUNCS: bindings::drm_gem_object_funcs = bindings::drm_gem_object_funcs {
@@ -259,9 +256,46 @@ impl<T: DriverObject> Object<T> {
         Ok(obj_ref)
     }
 
+    /// Returns the `Device` that owns this GEM object.
     pub fn dev(&self) -> &device::Device<T::Driver> {
         &self.dev
     }
+}
+
+impl<T: DriverObject> private::Sealed for Object<T> {}
+
+impl<T: DriverObject> Deref for Object<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl<T: DriverObject> DerefMut for Object<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
+}
+
+impl<T: DriverObject> drv::AllocImpl for Object<T> {
+    const ALLOC_OPS: drv::AllocOps = drv::AllocOps {
+        gem_create_object: None,
+        prime_handle_to_fd: Some(bindings::drm_gem_prime_handle_to_fd),
+        prime_fd_to_handle: Some(bindings::drm_gem_prime_fd_to_handle),
+        gem_prime_import: None,
+        gem_prime_import_sg_table: None,
+        gem_prime_mmap: Some(bindings::drm_gem_prime_mmap),
+        dumb_create: None,
+        dumb_map_offset: None,
+        dumb_destroy: None,
+    };
+}
+
+/// A reference-counted shared reference to a base GEM object.
+pub struct ObjectRef<T: IntoGEMObject> {
+    // Invariant: the pointer is valid and initialized, and this ObjectRef owns a reference to it.
+    ptr: *const T,
 }
 
 impl<T: IntoGEMObject> Clone for ObjectRef<T> {
