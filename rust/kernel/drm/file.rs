@@ -1,20 +1,27 @@
 // SPDX-License-Identifier: GPL-2.0 OR MIT
-#![allow(missing_docs)]
 
-//! DRM File structure
+//! DRM File objects.
 //!
 //! C header: [`include/linux/drm/drm_file.h`](../../../../include/linux/drm/drm_file.h)
 
 use crate::{bindings, drm, Result};
 use alloc::boxed::Box;
 use core::marker::PhantomData;
+use core::ops::Deref;
 
+/// Trait that must be implemented by DRM drivers to represent a DRM File (a client instance).
 pub trait DriverFile {
+    /// The parent `Driver` implementation for this `DriverFile`.
     type Driver: drm::drv::Driver;
 
+    /// Open a new file (called when a client opens the DRM device).
     fn open(device: &drm::device::Device<Self::Driver>) -> Result<Box<Self>>;
 }
 
+/// An open DRM File.
+///
+/// # Invariants
+/// `raw` is a valid pointer to a `drm_file` struct.
 #[repr(transparent)]
 pub struct File<T: DriverFile> {
     raw: *mut bindings::drm_file,
