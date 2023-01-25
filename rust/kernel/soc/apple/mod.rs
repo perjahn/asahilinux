@@ -2,5 +2,5 @@
 
 //! Apple SoC drivers
 
-#[cfg(CONFIG_APPLE_RTKIT)]
+#[cfg(CONFIG_APPLE_RTKIT = "y")]
 pub mod rtkit;
