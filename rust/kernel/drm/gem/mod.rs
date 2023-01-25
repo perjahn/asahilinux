@@ -17,10 +17,12 @@ use crate::{
 };
 use core::{mem, mem::ManuallyDrop, ops::Deref, ops::DerefMut};
 
-/// GEM object functions
+/// GEM object functions, which must be implemented by drivers.
 pub trait BaseDriverObject<T: BaseObject>: Sync + Send + Sized {
+    /// Create a new driver data object for a GEM object of a given size.
     fn new(dev: &device::Device<T::Driver>, size: usize) -> Result<Self>;
 
+    /// Open a new handle to an existing object, associated with a File.
     fn open(
         _obj: &<<T as IntoGEMObject>::Driver as drv::Driver>::Object,
         _file: &file::File<<<T as IntoGEMObject>::Driver as drv::Driver>::File>,
@@ -36,46 +38,23 @@ pub trait BaseDriverObject<T: BaseObject>: Sync + Send + Sized {
     }
 }
 
+/// Trait that represents a GEM object subtype
 pub trait IntoGEMObject: Sized + private::Sealed {
+    /// Owning driver for this type
     type Driver: drv::Driver;
 
+    /// Returns a reference to the raw `drm_gem_object` structure, which must be valid as long as
+    /// this owning object is valid.
     fn gem_obj(&self) -> &bindings::drm_gem_object;
+
+    /// Converts a pointer to a `drm_gem_object` into a pointer to this type.
     fn from_gem_obj(obj: *mut bindings::drm_gem_object) -> *mut Self;
 }
 
-pub trait BaseObject: IntoGEMObject {
-    fn size(&self) -> usize;
-    fn reference(&self) -> ObjectRef<Self>;
-    fn create_handle(
-        &self,
-        file: &file::File<<<Self as IntoGEMObject>::Driver as drv::Driver>::File>,
-    ) -> Result<u32>;
-    fn lookup_handle(
-        file: &file::File<<<Self as IntoGEMObject>::Driver as drv::Driver>::File>,
-        handle: u32,
-    ) -> Result<ObjectRef<Self>>;
-    fn create_mmap_offset(&self) -> Result<u64>;
-}
-
-#[repr(C)]
-pub struct Object<T: DriverObject> {
-    obj: bindings::drm_gem_object,
-    dev: ManuallyDrop<device::Device<T::Driver>>,
-    inner: T,
-}
-
+/// Trait which must be implemented by drivers using base GEM objects.
 pub trait DriverObject: BaseDriverObject<Object<Self>> {
+    /// Parent `Driver` for this object.
     type Driver: drv::Driver;
-}
-
-pub struct ObjectRef<T: IntoGEMObject> {
-    // Invariant: the pointer is valid and initialized, and this ObjectRef owns a reference to it
-    ptr: *const T,
-}
-
-pub struct UniqueObjectRef<T: IntoGEMObject> {
-    // Invariant: the pointer is valid and initialized, and this ObjectRef owns the only reference to it
-    ptr: *mut T,
 }
 
 unsafe extern "C" fn free_callback<T: DriverObject>(obj: *mut bindings::drm_gem_object) {
@@ -142,11 +121,14 @@ impl<T: DriverObject> IntoGEMObject for Object<T> {
     }
 }
 
-impl<T: IntoGEMObject> BaseObject for T {
+/// Base operations shared by all GEM object classes
+pub trait BaseObject: IntoGEMObject {
+    /// Returns the size of the object in bytes.
     fn size(&self) -> usize {
         self.gem_obj().size
     }
 
+    /// Creates a new reference to the object.
     fn reference(&self) -> ObjectRef<Self> {
         // SAFETY: Having a reference to an Object implies holding a GEM reference
         unsafe {
@@ -235,6 +217,7 @@ impl<T: DriverObject> Object<T> {
         vm_ops: core::ptr::null_mut(),
     };
 
+    /// Create a new GEM object.
     pub fn new(dev: &device::Device<T::Driver>, size: usize) -> Result<UniqueObjectRef<Self>> {
         let mut obj: Box<Self> = Box::try_new(Self {
             // SAFETY: This struct is expected to be zero-initialized
@@ -315,6 +298,32 @@ impl<T: IntoGEMObject> Drop for ObjectRef<T> {
     }
 }
 
+impl<T: IntoGEMObject> Deref for ObjectRef<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        // SAFETY: The pointer is valid per the invariant
+        unsafe { &*self.ptr }
+    }
+}
+
+/// A unique reference to a base GEM object.
+pub struct UniqueObjectRef<T: IntoGEMObject> {
+    // Invariant: the pointer is valid and initialized, and this ObjectRef owns the only reference
+    // to it.
+    ptr: *mut T,
+}
+
+impl<T: IntoGEMObject> UniqueObjectRef<T> {
+    /// Downgrade this reference to a shared reference.
+    pub fn into_ref(self) -> ObjectRef<T> {
+        let ptr = self.ptr as *const _;
+        core::mem::forget(self);
+
+        ObjectRef { ptr }
+    }
+}
+
 impl<T: IntoGEMObject> Drop for UniqueObjectRef<T> {
     fn drop(&mut self) {
         // SAFETY: Having a UniqueObjectRef implies holding a GEM
@@ -322,29 +331,6 @@ impl<T: IntoGEMObject> Drop for UniqueObjectRef<T> {
         unsafe {
             bindings::drm_gem_object_put((*self.ptr).gem_obj() as *const _ as *mut _);
         }
-    }
-}
-
-impl<T: DriverObject> Deref for Object<T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
-impl<T: DriverObject> DerefMut for Object<T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner
-    }
-}
-
-impl<T: IntoGEMObject> Deref for ObjectRef<T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        // SAFETY: The pointer is valid per the invariant
-        unsafe { &*self.ptr }
     }
 }
 
