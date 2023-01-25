@@ -20,29 +20,58 @@ use core::{
 
 use gem::BaseObject;
 
-#[repr(C)]
-pub struct Object<T: DriverObject> {
-    obj: bindings::drm_gem_shmem_object,
-    dev: ManuallyDrop<device::Device<T::Driver>>,
-    inner: T,
-}
-
+/// Trait which must be implemented by drivers using shmem-backed GEM objects.
 pub trait DriverObject: gem::BaseDriverObject<Object<Self>> {
+    /// Parent `Driver` for this object.
     type Driver: drv::Driver;
 }
 
-impl<T: DriverObject> private::Sealed for Object<T> {}
-
-impl<T: DriverObject> gem::IntoGEMObject for Object<T> {
-    type Driver = T::Driver;
-
-    fn gem_obj(&self) -> &bindings::drm_gem_object {
-        &self.obj.base
+// FIXME: This is terrible and I don't know how to avoid it
+#[cfg(CONFIG_NUMA)]
+macro_rules! vm_numa_fields {
+    ( $($field:ident: $val:expr),* $(,)? ) => {
+        bindings::vm_operations_struct {
+            $( $field: $val ),*,
+            set_policy: None,
+            get_policy: None,
+        }
     }
+}
 
-    fn from_gem_obj(obj: *mut bindings::drm_gem_object) -> *mut Object<T> {
-        crate::container_of!(obj, Object<T>, obj) as *mut Object<T>
+#[cfg(not(CONFIG_NUMA))]
+macro_rules! vm_numa_fields {
+    ( $($field:ident: $val:expr),* $(,)? ) => {
+        bindings::vm_operations_struct {
+            $( $field: $val ),*
+        }
     }
+}
+
+const SHMEM_VM_OPS: bindings::vm_operations_struct = vm_numa_fields! {
+    open: Some(bindings::drm_gem_shmem_vm_open),
+    close: Some(bindings::drm_gem_shmem_vm_close),
+    may_split: None,
+    mremap: None,
+    mprotect: None,
+    fault: Some(bindings::drm_gem_shmem_fault),
+    huge_fault: None,
+    map_pages: None,
+    pagesize: None,
+    page_mkwrite: None,
+    pfn_mkwrite: None,
+    access: None,
+    name: None,
+    find_special_page: None,
+};
+
+/// A shmem-backed GEM object.
+#[repr(C)]
+pub struct Object<T: DriverObject> {
+    obj: bindings::drm_gem_shmem_object,
+    // The DRM core ensures the Device exists as long as its objects exist, so we don't need to
+    // manage the reference count here.
+    dev: ManuallyDrop<device::Device<T::Driver>>,
+    inner: T,
 }
 
 unsafe extern "C" fn gem_create_object<T: DriverObject>(
@@ -270,49 +299,36 @@ impl<T: DriverObject> Drop for VMap<T> {
     }
 }
 
+/// A single scatter-gather entry, representing a span of pages in the device's DMA address space.
+///
+/// For devices not behind a standalone IOMMU, this corresponds to physical addresses.
 #[repr(transparent)]
 pub struct SGEntry(bindings::scatterlist);
 
 impl SGEntry {
+    /// Returns the starting DMA address of this span
     pub fn dma_address(&self) -> usize {
         (unsafe { bindings::sg_dma_address(&self.0) }) as usize
     }
 
+    /// Returns the length of this span in bytes
     pub fn dma_len(&self) -> usize {
         (unsafe { bindings::sg_dma_len(&self.0) }) as usize
     }
 }
 
+/// A scatter-gather table of DMA address spans for a GEM shmem object.
+///
+/// # Invariants
+/// `sgt` must be a valid pointer to the `sg_table`, which must correspond to the owned
+/// object in `_owner` (which ensures it remains valid).
 pub struct SGTable<T: DriverObject> {
     sgt: *const bindings::sg_table,
     _owner: gem::ObjectRef<Object<T>>,
 }
 
-unsafe impl<T: DriverObject> Send for SGTable<T> {}
-unsafe impl<T: DriverObject> Sync for SGTable<T> {}
-
-pub struct SGTableIter<'a> {
-    sg: *mut bindings::scatterlist,
-    left: usize,
-    _p: PhantomData<&'a ()>,
-}
-
-impl<'a> Iterator for SGTableIter<'a> {
-    type Item = &'a SGEntry;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.left == 0 {
-            None
-        } else {
-            let sg = self.sg;
-            self.sg = unsafe { bindings::sg_next(self.sg) };
-            self.left -= 1;
-            Some(unsafe { &(*(sg as *const SGEntry)) })
-        }
-    }
-}
-
 impl<T: DriverObject> SGTable<T> {
+    /// Returns an iterator through the SGTable's entries
     pub fn iter(&'_ self) -> SGTableIter<'_> {
         SGTableIter {
             left: unsafe { (*self.sgt).nents } as usize,
@@ -331,86 +347,31 @@ impl<'a, T: DriverObject> IntoIterator for &'a SGTable<T> {
     }
 }
 
-impl<T: DriverObject> Object<T> {
-    const SIZE: usize = mem::size_of::<Self>();
-    const VTABLE: bindings::drm_gem_object_funcs = bindings::drm_gem_object_funcs {
-        free: Some(free_callback::<T>),
-        open: Some(super::open_callback::<T, Object<T>>),
-        close: Some(super::close_callback::<T, Object<T>>),
-        print_info: Some(bindings::drm_gem_shmem_object_print_info),
-        export: None,
-        pin: Some(bindings::drm_gem_shmem_object_pin),
-        unpin: Some(bindings::drm_gem_shmem_object_unpin),
-        get_sg_table: Some(bindings::drm_gem_shmem_object_get_sg_table),
-        vmap: Some(bindings::drm_gem_shmem_object_vmap),
-        vunmap: Some(bindings::drm_gem_shmem_object_vunmap),
-        mmap: Some(bindings::drm_gem_shmem_object_mmap),
-        vm_ops: &SHMEM_VM_OPS,
-    };
+/// SAFETY: `sg_table` objects are safe to send across threads.
+unsafe impl<T: DriverObject> Send for SGTable<T> {}
+unsafe impl<T: DriverObject> Sync for SGTable<T> {}
 
-    // SAFETY: Must only be used with DRM functions that are thread-safe
-    unsafe fn mut_shmem(&self) -> *mut bindings::drm_gem_shmem_object {
-        &self.obj as *const _ as *mut _
-    }
-
-    pub fn new(dev: &device::Device<T::Driver>, size: usize) -> Result<gem::UniqueObjectRef<Self>> {
-        // SAFETY: This function can be called as long as the ALLOC_OPS are set properly
-        // for this driver, and the gem_create_object is called.
-        let p = unsafe { bindings::drm_gem_shmem_create(dev.raw() as *mut _, size) };
-        let p = crate::container_of!(p, Object<T>, obj) as *mut _;
-
-        // SAFETY: The gem_create_object callback ensures this is a valid Object<T>,
-        // so we can take a unique reference to it.
-        let obj_ref = gem::UniqueObjectRef { ptr: p };
-
-        Ok(obj_ref)
-    }
-
-    pub fn dev(&self) -> &device::Device<T::Driver> {
-        &self.dev
-    }
-
-    pub fn sg_table(&self) -> Result<SGTable<T>> {
-        let sgt = from_kernel_err_ptr(unsafe {
-            bindings::drm_gem_shmem_get_pages_sgt(self.mut_shmem())
-        })?;
-
-        Ok(SGTable {
-            sgt,
-            _owner: self.reference(),
-        })
-    }
-
-    pub fn vmap(&self) -> Result<VMap<T>> {
-        let mut map: MaybeUninit<bindings::iosys_map> = MaybeUninit::uninit();
-
-        // SAFETY: drm_gem_shmem_vmap is thread-safe
-        to_result(unsafe { bindings::drm_gem_shmem_vmap(self.mut_shmem(), map.as_mut_ptr()) })?;
-
-        // SAFETY: if drm_gem_shmem_vmap did not fail, map is initialized now
-        let map = unsafe { map.assume_init() };
-
-        Ok(VMap {
-            map,
-            owner: self.reference(),
-        })
-    }
-
-    pub fn set_wc(&mut self, map_wc: bool) {
-        unsafe { (*self.mut_shmem()).map_wc = map_wc };
-    }
+/// An iterator through `SGTable` entries.
+///
+/// # Invariants
+/// `sg` must be a valid pointer to the scatterlist, which must outlive our lifetime.
+pub struct SGTableIter<'a> {
+    sg: *mut bindings::scatterlist,
+    left: usize,
+    _p: PhantomData<&'a ()>,
 }
 
-impl<T: DriverObject> Deref for Object<T> {
-    type Target = T;
+impl<'a> Iterator for SGTableIter<'a> {
+    type Item = &'a SGEntry;
 
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
-impl<T: DriverObject> DerefMut for Object<T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.left == 0 {
+            None
+        } else {
+            let sg = self.sg;
+            self.sg = unsafe { bindings::sg_next(self.sg) };
+            self.left -= 1;
+            Some(unsafe { &(*(sg as *const SGEntry)) })
+        }
     }
 }
