@@ -198,7 +198,7 @@ impl gem::BaseDriverObject<Object> for DriverObject {
 
     fn close(obj: &Object, file: &DrmFile) {
         mod_pr_debug!("DriverObject::close\n");
-        obj.drop_file_mappings(file.inner().file_id());
+        obj.drop_file_mappings(file.file_id());
     }
 }
 
