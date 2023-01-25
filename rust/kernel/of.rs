@@ -43,6 +43,7 @@ macro_rules! define_of_id_table {
     };
 }
 
+/// Convenience macro to declare which device ID table to use for a bus driver.
 #[macro_export]
 macro_rules! driver_of_id_table {
     ($name:expr) => {
@@ -55,6 +56,8 @@ macro_rules! driver_of_id_table {
     };
 }
 
+/// Declare a device ID table as a module-level table. This creates the necessary module alias
+/// entries to enable module autoloading.
 #[macro_export]
 macro_rules! module_of_id_table {
     ($item_name:ident, $table_name:ident) => {
