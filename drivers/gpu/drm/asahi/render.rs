@@ -889,7 +889,7 @@ impl file::Queue for RenderQueue::ver {
                     unk_pointer: inner_weak_ptr!(ptr, unk_pointee),
                     unk_job_buf: inner_weak_ptr!(ptr, unk_buf_0),
                     unk_64: 0x0, // fixed
-                    unk_68: if unk1 { 1 } else { 0 },
+                    unk_68: unk1.into(),
                     uuid: uuid_ta,
                     unk_70: 0x0,                // fixed
                     unk_74: Default::default(), // fixed
