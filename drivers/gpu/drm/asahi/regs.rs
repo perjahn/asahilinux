@@ -43,7 +43,7 @@ pub(crate) enum FaultUnit {
     IPF_CPF(u8),
     VF(u8),
     VF_CPF(u8),
-    ZL(u8),
+    ZLS(u8),
 
     dPM,
     dCDM_KS(u8),
@@ -286,7 +286,7 @@ impl Resources {
                 0xb => FaultUnit::IPF_CPF(unit_code >> 4),
                 0xc => FaultUnit::VF(unit_code >> 4),
                 0xd => FaultUnit::VF_CPF(unit_code >> 4),
-                0xe => FaultUnit::VF_CPF(unit_code >> 4),
+                0xe => FaultUnit::ZLS(unit_code >> 4),
                 _ => FaultUnit::Unknown(unit_code),
             },
             0xa1 => FaultUnit::dPM,
