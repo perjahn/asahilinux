@@ -157,11 +157,14 @@ impl<T: IntoGEMObject> BaseObject for T {
         }
     }
 
+    /// Creates a new handle for the object associated with a given `File`
+    /// (or returns an existing one).
     fn create_handle(
         &self,
         file: &file::File<<<Self as IntoGEMObject>::Driver as drv::Driver>::File>,
     ) -> Result<u32> {
         let mut handle: u32 = 0;
+        // SAFETY: The arguments are all valid per the type invariants.
         to_result(unsafe {
             bindings::drm_gem_handle_create(
                 file.raw() as *mut _,
@@ -171,11 +174,12 @@ impl<T: IntoGEMObject> BaseObject for T {
         })?;
         Ok(handle)
     }
-
+    /// Looks up an object by its handle for a given `File`.
     fn lookup_handle(
         file: &file::File<<<Self as IntoGEMObject>::Driver as drv::Driver>::File>,
         handle: u32,
     ) -> Result<ObjectRef<Self>> {
+        // SAFETY: The arguments are all valid per the type invariants.
         let ptr = unsafe { bindings::drm_gem_object_lookup(file.raw() as *mut _, handle) };
 
         if ptr.is_null() {
@@ -187,6 +191,7 @@ impl<T: IntoGEMObject> BaseObject for T {
         }
     }
 
+    /// Creates an mmap offset to map the object from userspace.
     fn create_mmap_offset(&self) -> Result<u64> {
         to_result(unsafe {
             // TODO: is this threadsafe?
