@@ -77,7 +77,7 @@ impl File {
         data: &mut bindings::drm_asahi_get_param,
         file: &DrmFile,
     ) -> Result<u32> {
-        mod_dev_dbg!(device, "[File {}]: IOCTL: get_param", file.inner().id);
+        mod_dev_dbg!(device, "[File {}]: IOCTL: get_param", file.id);
 
         let gpu = &device.data().gpu;
 
