@@ -294,7 +294,7 @@ impl WorkQueue for WorkQueue::ver {
             inner
                 .info
                 .state
-                .with(|raw, _inner| raw.cpu_freeptr.store((*i).wptr, Ordering::Release));
+                .with(|raw, _inner| raw.cpu_freeptr.store(i.wptr, Ordering::Release));
         }
 
         inner.pending.drain(..completed_commands);
