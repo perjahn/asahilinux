@@ -22,19 +22,21 @@ pub enum DeviceId {
 
 /// Defines a const open firmware device id table that also carries per-entry data/context/info.
 ///
-/// The name of the const is `OF_DEVICE_ID_TABLE`, which is what buses are expected to name their
-/// open firmware tables.
-///
-/// # Examples
+/// # Example
 ///
 /// ```
-/// # use kernel::define_of_id_table;
+/// # use kernel::{define_of_id_table, module_of_id_table, driver_of_id_table};
 /// use kernel::of;
 ///
-/// define_of_id_table! {u32, [
+/// define_of_id_table! {MY_ID_TABLE, u32, [
 ///     (of::DeviceId::Compatible(b"test-device1,test-device2"), Some(0xff)),
 ///     (of::DeviceId::Compatible(b"test-device3"), None),
 /// ]};
+///
+/// module_of_id_table!(MOD_TABLE, ASAHI_ID_TABLE);
+///
+/// // Within the `Driver` implementation:
+/// driver_of_id_table!(MY_ID_TABLE);
 /// ```
 #[macro_export]
 macro_rules! define_of_id_table {
