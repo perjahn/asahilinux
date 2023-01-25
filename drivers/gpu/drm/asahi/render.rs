@@ -589,7 +589,7 @@ impl file::Queue for RenderQueue::ver {
                     #[ver(G == G14 && V < V13_0B4)]
                     unk_8c_g14: U64(0),
                     restart_branch_offset: off,
-                    unk_98: if unk3 { 1 } else { 0 },
+                    unk_98: unk3.into(),
                     #[ver(V >= V13_0B4)]
                     unk_9c: Default::default(),
                 })?;
@@ -799,7 +799,7 @@ impl file::Queue for RenderQueue::ver {
                         no_clear_pipeline_textures: (cmdbuf.flags
                             & bindings::ASAHI_CMDBUF_NO_CLEAR_PIPELINE_TEXTURES as u64
                             != 0) as u32,
-                        unk_param: if unk2 { 1 } else { 0 }, // 1 for boot stuff?
+                        unk_param: unk2.into(), // 1 for boot stuff?
                         unk_pointee: 0,
                         meta: fw::job::raw::JobMeta {
                             unk_4: 0,
