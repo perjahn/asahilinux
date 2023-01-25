@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: GPL-2.0 OR MIT
-#![allow(missing_docs)]
 
-//! DRM device
+//! DRM device.
 //!
 //! C header: [`include/linux/drm/drm_device.h`](../../../../include/linux/drm/drm_device.h)
 
 use crate::{bindings, device, drm, types::PointerWrapper};
 use core::marker::PhantomData;
 
+/// Represents a reference to a DRM device. The device is reference-counted and is guaranteed to
+/// not be dropped while this object is alive.
 pub struct Device<T: drm::drv::Driver> {
     // Type invariant: ptr must be a valid and initialized drm_device,
     // and this value must either own a reference to it or the caller
