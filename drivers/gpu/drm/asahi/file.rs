@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: GPL-2.0-only OR MIT
-#![allow(missing_docs)]
-#![allow(unused_imports)]
-#![allow(dead_code)]
 #![allow(clippy::unusual_byte_groupings)]
 
-//! Asahi File state
+//! File implementation, which represents a single DRM client.
+//!
+//! This is in charge of managing the resources associated with one GPU client, including an
+//! arbitrary number of submission queues and Vm objects, and reporting hardware/driver
+//! information to userspace and accepting submissions.
 
 use crate::debug::*;
 use crate::driver::AsahiDevice;
-use crate::fw::types::*;
-use crate::{alloc, buffer, driver, gem, gpu, mmu, render};
+use crate::{alloc, buffer, driver, gem, mmu};
 use kernel::drm::gem::BaseObject;
 use kernel::prelude::*;
 use kernel::sync::{smutex::Mutex, Arc};
@@ -17,39 +17,53 @@ use kernel::{bindings, drm, xarray};
 
 const DEBUG_CLASS: DebugFlags = DebugFlags::File;
 
+/// A client instance of an `mmu::Vm` address space.
 struct Vm {
-    dummy_obj: gem::ObjectRef,
     ualloc: Arc<Mutex<alloc::DefaultAllocator>>,
     ualloc_priv: Arc<Mutex<alloc::DefaultAllocator>>,
     vm: mmu::Vm,
+    _dummy_obj: gem::ObjectRef,
 }
 
+/// Trait implemented by queue implementations (Render and Compute).
 pub(crate) trait Queue: Send + Sync {
     fn submit(&self, cmd: &bindings::drm_asahi_submit, id: u64) -> Result;
 }
 
+/// State associated with a client.
 pub(crate) struct File {
     id: u64,
     vms: xarray::XArray<Box<Vm>>,
     queues: xarray::XArray<Arc<Box<dyn Queue>>>,
 }
 
+/// Convenience type alias for our DRM `File` type.
 pub(crate) type DrmFile = drm::file::File<File>;
 
+/// Start address of the 32-bit USC address space.
 const VM_SHADER_START: u64 = 0x11_00000000;
+/// End address of the 32-bit USC address space.
 const VM_SHADER_END: u64 = 0x11_ffffffff;
+/// Start address of the general user mapping region.
 const VM_USER_START: u64 = 0x20_00000000;
+/// End address of the general user mapping region.
 const VM_USER_END: u64 = 0x5f_ffffffff;
 
+/// Start address of the kernel-managed GPU-only mapping region.
 const VM_DRV_GPU_START: u64 = 0x60_00000000;
+/// End address of the kernel-managed GPU-only mapping region.
 const VM_DRV_GPU_END: u64 = 0x60_ffffffff;
+/// Start address of the kernel-managed GPU/FW shared mapping region.
 const VM_DRV_GPUFW_START: u64 = 0x61_00000000;
+/// End address of the kernel-managed GPU/FW shared mapping region.
 const VM_DRV_GPUFW_END: u64 = 0x61_ffffffff;
+/// Address of a special dummy page?
 const VM_UNK_PAGE: u64 = 0x6f_ffff8000;
 
 impl drm::file::DriverFile for File {
     type Driver = driver::AsahiDriver;
 
+    /// Create a new `File` instance for a fresh client.
     fn open(device: &AsahiDevice) -> Result<Box<Self>> {
         debug::update_debug_flags();
 
@@ -72,6 +86,7 @@ macro_rules! param {
 }
 
 impl File {
+    /// IOCTL: get_param: Get a driver parameter value.
     pub(crate) fn get_param(
         device: &AsahiDevice,
         data: &mut bindings::drm_asahi_get_param,
@@ -102,6 +117,7 @@ impl File {
         Ok(0)
     }
 
+    /// IOCTL: vm_create: Create a new `Vm`.
     pub(crate) fn vm_create(
         device: &AsahiDevice,
         data: &mut bindings::drm_asahi_vm_create,
@@ -153,10 +169,10 @@ impl File {
 
         mod_dev_dbg!(device, "[File {} VM {}]: VM created", file_id, id);
         resv.store(Box::try_new(Vm {
-            dummy_obj,
             ualloc,
             ualloc_priv,
             vm,
+            _dummy_obj: dummy_obj,
         })?)?;
 
         data.vm_id = id;
@@ -164,6 +180,7 @@ impl File {
         Ok(0)
     }
 
+    /// IOCTL: vm_destroy: Destroy a `Vm`.
     pub(crate) fn vm_destroy(
         _device: &AsahiDevice,
         data: &mut bindings::drm_asahi_vm_destroy,
@@ -176,6 +193,7 @@ impl File {
         }
     }
 
+    /// IOCTL: gem_create: Create a new GEM object.
     pub(crate) fn gem_create(
         device: &AsahiDevice,
         data: &mut bindings::drm_asahi_gem_create,
@@ -208,6 +226,7 @@ impl File {
         Ok(0)
     }
 
+    /// IOCTL: gem_mmap_offset: Assign an mmap offset to a GEM object.
     pub(crate) fn gem_mmap_offset(
         device: &AsahiDevice,
         data: &mut bindings::drm_asahi_gem_mmap_offset,
@@ -229,6 +248,7 @@ impl File {
         Ok(0)
     }
 
+    /// IOCTL: gem_bind: Map a GEM object into a Vm.
     pub(crate) fn gem_bind(
         device: &AsahiDevice,
         data: &mut bindings::drm_asahi_gem_bind,
@@ -309,6 +329,7 @@ impl File {
         Ok(0)
     }
 
+    /// IOCTL: queue_create: Create a new command submission queue of a given type.
     pub(crate) fn queue_create(
         device: &AsahiDevice,
         data: &mut bindings::drm_asahi_queue_create,
@@ -360,6 +381,7 @@ impl File {
         Ok(0)
     }
 
+    /// IOCTL: queue_destroy: Destroy a command submission queue.
     pub(crate) fn queue_destroy(
         _device: &AsahiDevice,
         data: &mut bindings::drm_asahi_queue_destroy,
@@ -372,6 +394,7 @@ impl File {
         }
     }
 
+    /// IOCTL: submit: Submit GPU work to a command submission queue.
     pub(crate) fn submit(
         device: &AsahiDevice,
         data: &mut bindings::drm_asahi_submit,
@@ -414,6 +437,7 @@ impl File {
         }
     }
 
+    /// Returns the unique file ID for this `File`.
     pub(crate) fn file_id(&self) -> u64 {
         self.id
     }
