@@ -154,7 +154,7 @@ impl VmInner {
             // rendering and therefore likely bound.
             self.bind_token
                 .as_ref()
-                .map(|token| (token.last_slot() as u32 + UAT_USER_CTX_START as u32))
+                .map(|token| (token.last_slot() + UAT_USER_CTX_START as u32))
         }
     }
 
