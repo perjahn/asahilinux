@@ -140,8 +140,7 @@ pub unsafe trait RawDeviceId {
     fn to_rawid(&self, offset: isize) -> Self::RawType;
 }
 
-/// A zero-terminated device id array, followed by context data.
-
+/// A zero-terminated device id array.
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub struct IdArrayIds<T: RawDeviceId, const N: usize> {
@@ -151,6 +150,7 @@ pub struct IdArrayIds<T: RawDeviceId, const N: usize> {
 
 unsafe impl<T: RawDeviceId, const N: usize> Sync for IdArrayIds<T, N> {}
 
+/// A zero-terminated device id array, followed by context data.
 #[repr(C)]
 pub struct IdArray<T: RawDeviceId, U, const N: usize> {
     ids: IdArrayIds<T, N>,
@@ -198,10 +198,12 @@ impl<T: RawDeviceId, U, const N: usize> IdArray<T, U, N> {
         }
     }
 
+    /// Returns the number of items in the ID table.
     pub const fn count(&self) -> usize {
         self.ids.ids.len()
     }
 
+    /// Returns the inner IdArrayIds array, without the context data.
     pub const fn as_ids(&self) -> IdArrayIds<T, N>
     where
         T: ~const RawDeviceId + Copy,
@@ -375,28 +377,9 @@ macro_rules! define_id_array {
 // TODO: Exported but not usable by kernel modules (requires `const_trait_impl`).
 /// ```ignore
 /// #![feature(const_trait_impl)]
-/// # use kernel::{define_id_table, driver::RawDeviceId};
-///
-/// #[derive(Copy, Clone)]
-/// struct Id(u32);
-///
-/// // SAFETY: `ZERO` is all zeroes and `to_rawid` stores `offset` as the second element of the raw
-/// // device id pair.
-/// unsafe impl const RawDeviceId for Id {
-///     type RawType = (u64, isize);
-///     const ZERO: Self::RawType = (0, 0);
-///     fn to_rawid(&self, offset: isize) -> Self::RawType {
-///         (self.0 as u64 + 1, offset)
-///     }
-/// }
-///
-/// define_id_table!(T1, Id, &'static [u8], [(Id(10), None)]);
-/// define_id_table!(T2, Id, &'static [u8], [(Id(10), Some(b"id1")), ]);
-/// define_id_table!(T3, Id, &'static [u8], [(Id(10), Some(b"id1")), (Id(20), Some(b"id2"))]);
-/// define_id_table!(T4, Id, &'static [u8], [(Id(10), Some(b"id1")), (Id(20), Some(b"id2")), ]);
-/// define_id_table!(T5, Id, &'static [u8], [(Id(10), None), (Id(20), Some(b"id2")), ]);
-/// define_id_table!(T6, Id, &'static [u8], [(Id(10), Some(b"id1")), (Id(20), None), ]);
-/// define_id_table!(T7, Id, &'static [u8], [(Id(10), None), (Id(20), None), ]);
+/// # use kernel::{driver_id_table};
+
+/// driver_id_table!(BUS_ID_TABLE, Id, &'static [u8], MY_ID_ARRAY);
 /// ```
 #[macro_export]
 macro_rules! driver_id_table {
@@ -406,6 +389,20 @@ macro_rules! driver_id_table {
     };
 }
 
+/// Declares an [`IdArray`] as a module-level ID tablewith a concise syntax.
+///
+/// It is meant to be used by buses and subsystems to create a similar macro with their device id
+/// type already specified, i.e., with fewer parameters to the end user.
+///
+/// # Examples
+///
+// TODO: Exported but not usable by kernel modules (requires `const_trait_impl`).
+/// ```ignore
+/// #![feature(const_trait_impl)]
+/// # use kernel::{driver_id_table};
+
+/// driver_id_table!(BUS_ID_TABLE, Id, &'static [u8], MY_ID_ARRAY);
+/// ```
 #[macro_export]
 macro_rules! module_id_table {
     ($item_name:ident, $table_type:literal, $id_type:ty, $table_name:ident) => {
