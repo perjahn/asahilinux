@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
-#![allow(missing_docs)]
 
-//! IOMMU page tables
+//! IOMMU page table management
 //!
 //! C header: [`include/io-pgtable.h`](../../../../include/io-pgtable.h)
 
@@ -16,34 +15,63 @@ use core::marker::PhantomData;
 use core::mem;
 use core::ops::{Deref, DerefMut};
 
+/// Protection flags for IOMMU mappings
 pub mod prot {
+    /// Read access
     pub const READ: u32 = bindings::IOMMU_READ;
+    /// Write access
     pub const WRITE: u32 = bindings::IOMMU_WRITE;
+    /// Request cache coherency
     pub const CACHE: u32 = bindings::IOMMU_CACHE;
+    /// Request no-execute permission
     pub const NOEXEC: u32 = bindings::IOMMU_NOEXEC;
+    /// MMIO peripheral mapping
     pub const MMIO: u32 = bindings::IOMMU_MMIO;
+    /// Privileged mapping
     pub const PRIV: u32 = bindings::IOMMU_PRIV;
 }
 
+/// Represents a requested io_pgtable configuration.
 pub struct Config {
+    /// Quirk bitmask (type-specific).
     pub quirks: usize,
+    /// Valid page sizes, as a bitmask of powers of two.
     pub pgsize_bitmap: usize,
+    /// Input address space size in bits.
     pub ias: usize,
+    /// Output address space size in bits.
     pub oas: usize,
+    /// IOMMU uses coherent accesses for page table walks.
     pub coherent_walk: bool,
 }
 
+/// IOMMU callbacks for TLB and page table management.
+///
+/// Users must implement this trait to perform the TLB flush actions for this IOMMU, if
+/// required.
 pub trait FlushOps {
+    /// User-specified type owned by the IOPagetable that will be passed to TLB operations.
     type Data: PointerWrapper + Send + Sync;
 
+    /// Synchronously invalidate the entire TLB context.
     fn tlb_flush_all(data: <Self::Data as PointerWrapper>::Borrowed<'_>);
+
+    /// Synchronously invalidate all intermediate TLB state (sometimes referred to as the "walk
+    /// cache") for a virtual address range.
     fn tlb_flush_walk(
         data: <Self::Data as PointerWrapper>::Borrowed<'_>,
         iova: usize,
         size: usize,
         granule: usize,
     );
-    // TODO: Implement the gather argument
+
+    /// Optional callback to queue up leaf TLB invalidation for a single page.
+    ///
+    /// IOMMUs that cannot batch TLB invalidation operations efficiently will typically issue
+    /// them here, but others may decide to update the iommu_iotlb_gather structure and defer
+    /// the invalidation until iommu_iotlb_sync() instead.
+    ///
+    /// TODO: Implement the gather argument for batching.
     fn tlb_add_page(
         data: <Self::Data as PointerWrapper>::Borrowed<'_>,
         iova: usize,
@@ -51,7 +79,7 @@ pub trait FlushOps {
     );
 }
 
-/// An IOMMU page table
+/// An IOMMU page table.
 ///
 /// # Invariants
 ///
@@ -65,7 +93,9 @@ pub struct IOPagetable<T: FlushOps, U> {
     _q: PhantomData<U>,
 }
 
+/// Helper trait to get the config type for a single page table type from the union.
 pub trait GetConfig<T: FlushOps> {
+    /// Returns the specific output configuration for this page table type.
     fn cfg(iopt: &IOPagetable<T, Self>) -> Self
     where
         Self: Sized;
@@ -78,6 +108,7 @@ impl<T: FlushOps, U: GetConfig<T>> IOPagetable<T, U> {
         tlb_add_page: Some(tlb_add_page_callback::<T>),
     };
 
+    /// Create a new IOPagetable of a given format.
     fn new_fmt(
         dev: &dyn device::RawDevice,
         format: u32,
@@ -119,10 +150,12 @@ impl<T: FlushOps, U: GetConfig<T>> IOPagetable<T, U> {
         })
     }
 
+    /// Get the configuration for this IOPagetable.
     pub fn cfg(&self) -> U {
         <U as GetConfig<T>>::cfg(self)
     }
 
+    /// Map a range of pages.
     pub fn map_pages(
         &mut self,
         iova: usize,
@@ -149,6 +182,7 @@ impl<T: FlushOps, U: GetConfig<T>> IOPagetable<T, U> {
         Ok(mapped)
     }
 
+    /// Unmap a range of pages.
     pub fn unmap_pages(
         &mut self,
         iova: usize,
@@ -167,6 +201,7 @@ impl<T: FlushOps, U: GetConfig<T>> IOPagetable<T, U> {
         }
     }
 
+    /// Walk the page table and translate an iova to a physical address.
     pub fn iova_to_phys(&mut self, iova: usize) -> u64 {
         unsafe { (*self.ops).iova_to_phys.unwrap()(self.ops, iova as u64) }
     }
@@ -184,6 +219,8 @@ impl<T: FlushOps, U> Drop for IOPagetable<T, U> {
     }
 }
 
+// SAFETY: The underlying data is safe to send across threads, and all mutation operations require
+// a mutable reference.
 unsafe impl<T: FlushOps, U> Send for IOPagetable<T, U> {}
 unsafe impl<T: FlushOps, U> Sync for IOPagetable<T, U> {}
 
@@ -214,8 +251,10 @@ unsafe extern "C" fn tlb_add_page_callback<T: FlushOps>(
     T::tlb_add_page(unsafe { T::Data::borrow(cookie) }, iova as usize, granule);
 }
 
+// Helper macro to declare a single IO pagetable format.
 macro_rules! iopt_cfg {
     ($name:ident, $field:ident, $type:ident) => {
+        /// Output configuration struct for this page table type.
         pub type $name = bindings::$type;
 
         impl<T: FlushOps> GetConfig<T> for $name {
@@ -230,11 +269,14 @@ impl<T: FlushOps> GetConfig<T> for () {
     fn cfg(_iopt: &IOPagetable<T, ()>) {}
 }
 
+// Helper macro to declare a single IO pagetable type.
 macro_rules! iopt_type {
     ($type:ident, $cfg:ty, $fmt:ident) => {
+        /// Represents an IOPagetable of this type.
         pub struct $type<T: FlushOps>(IOPagetable<T, $cfg>);
 
         impl<T: FlushOps> $type<T> {
+            /// Creates a new IOPagetable implementation of this type.
             pub fn new(dev: &dyn device::RawDevice, config: Config, data: T::Data) -> Result<Self> {
                 Ok(Self(IOPagetable::<T, $cfg>::new_fmt(
                     dev,
