@@ -765,7 +765,7 @@ impl GpuManager for GpuManager::ver {
         Ok(Box::try_new(compute::ComputeQueue::ver::new(
             &self.dev,
             vm,
-            &mut *kalloc,
+            &mut kalloc,
             ualloc,
             self.event_manager.clone(),
             id,
