@@ -126,9 +126,7 @@ impl<T: PointerWrapper> XArray<T> {
 
         // SAFETY: We have just created `xa`. This data structure does not require
         // pinning.
-        unsafe {
-            bindings::xa_init_flags(xa.get(), flags)
-        };
+        unsafe { bindings::xa_init_flags(xa.get(), flags) };
 
         // INVARIANT: Initialize the `XArray` with a valid `xa`.
         Ok(XArray {
