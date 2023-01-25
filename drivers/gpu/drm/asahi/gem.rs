@@ -1,20 +1,19 @@
 // SPDX-License-Identifier: GPL-2.0-only OR MIT
-#![allow(missing_docs)]
-#![allow(unused_imports)]
-#![allow(dead_code)]
 
-//! Asahi GEM object implementation
+//! Asahi driver GEM object implementation
+//!
+//! Basic wrappers and adaptations between generic GEM shmem objects and this driver's
+//! view of what a GPU buffer object is. It is in charge of keeping track of all mappings for
+//! each GEM object so we can remove them when a client (File) or a Vm are destroyed, as well as
+//! implementing RTKit buffers on top of GEM objects for firmware use.
 
 use kernel::{
-    bindings, c_str, drm,
-    drm::{device, drv, gem, gem::shmem},
-    error::{to_result, Result},
-    io_mem::IoMem,
-    module_platform_driver, of, platform,
+    bindings,
+    drm::{gem, gem::shmem},
+    error::Result,
     prelude::*,
     soc::apple::rtkit,
     sync::smutex::Mutex,
-    sync::{Arc, ArcBorrow},
 };
 
 use kernel::drm::gem::BaseObject;
@@ -25,21 +24,34 @@ use crate::file::DrmFile;
 
 const DEBUG_CLASS: DebugFlags = DebugFlags::Gem;
 
+/// Represents the inner data of a GEM object for this driver.
 pub(crate) struct DriverObject {
+    /// Whether this is a kernel-created object.
     kernel: bool,
+    /// Object creation flags.
     flags: u32,
+    /// Locked list of mapping tuples: (file_id, vm_id, mapping)
     mappings: Mutex<Vec<(u64, u64, crate::mmu::Mapping)>>,
 }
 
+/// Type alias for the shmem GEM object type for this driver.
 pub(crate) type Object = shmem::Object<DriverObject>;
+
+/// Type alias for the SGTable type for this driver.
 pub(crate) type SGTable = shmem::SGTable<DriverObject>;
 
+/// A shared reference to a GEM object for this driver.
 pub(crate) struct ObjectRef {
+    /// The underlying GEM object reference
     pub(crate) gem: gem::ObjectRef<shmem::Object<DriverObject>>,
+    /// The kernel-side VMap of this object, if needed
     vmap: Option<shmem::VMap<DriverObject>>,
 }
 
 impl DriverObject {
+    /// Drop all object mappings for a given file ID.
+    ///
+    /// Used on file close.
     fn drop_file_mappings(&self, file_id: u64) {
         let mut mappings = self.mappings.lock();
         for (index, (mapped_fid, _mapped_vmid, _mapping)) in mappings.iter().enumerate() {
@@ -50,6 +62,9 @@ impl DriverObject {
         }
     }
 
+    /// Drop all object mappings for a given VM ID.
+    ///
+    /// Used on VM destroy.
     fn drop_vm_mappings(&self, vm_id: u64) {
         let mut mappings = self.mappings.lock();
         for (index, (_mapped_fid, mapped_vmid, _mapping)) in mappings.iter().enumerate() {
@@ -62,10 +77,12 @@ impl DriverObject {
 }
 
 impl ObjectRef {
+    /// Create a new wrapper for a raw GEM object reference.
     pub(crate) fn new(gem: gem::ObjectRef<shmem::Object<DriverObject>>) -> ObjectRef {
         ObjectRef { gem, vmap: None }
     }
 
+    /// Return the `VMap` for this object, creating it if necessary.
     pub(crate) fn vmap(&mut self) -> Result<&mut shmem::VMap<DriverObject>> {
         if self.vmap.is_none() {
             self.vmap = Some(self.gem.vmap()?);
@@ -73,6 +90,8 @@ impl ObjectRef {
         Ok(self.vmap.as_mut().unwrap())
     }
 
+    /// Return the IOVA of this object at which it is mapped in a given `Vm` identified by its ID,
+    /// if it is mapped in that `Vm`.
     pub(crate) fn iova(&self, vm_id: u64) -> Option<usize> {
         let mappings = self.gem.mappings.lock();
         for (_mapped_fid, mapped_vmid, mapping) in mappings.iter() {
@@ -84,10 +103,14 @@ impl ObjectRef {
         None
     }
 
+    /// Returns the size of an object in bytes
     pub(crate) fn size(&self) -> usize {
         self.gem.size()
     }
 
+    /// Maps an object into a given `Vm` at any free address.
+    ///
+    /// Returns Err(EBUSY) if there is already a mapping.
     pub(crate) fn map_into(&mut self, vm: &crate::mmu::Vm) -> Result<usize> {
         let vm_id = vm.id();
         let mut mappings = self.gem.mappings.lock();
@@ -105,6 +128,9 @@ impl ObjectRef {
         Ok(iova)
     }
 
+    /// Maps an object into a given `Vm` at any free address within a given range.
+    ///
+    /// Returns Err(EBUSY) if there is already a mapping.
     pub(crate) fn map_into_range(
         &mut self,
         vm: &crate::mmu::Vm,
@@ -131,6 +157,10 @@ impl ObjectRef {
         Ok(iova)
     }
 
+    /// Maps an object into a given `Vm` at a specific address.
+    ///
+    /// Returns Err(EBUSY) if there is already a mapping.
+    /// Returns Err(ENOSPC) if the requested address is already busy.
     pub(crate) fn map_at(
         &mut self,
         vm: &crate::mmu::Vm,
@@ -155,15 +185,13 @@ impl ObjectRef {
         Ok(())
     }
 
-    pub(crate) fn drop_file_mappings(&mut self, file_id: u64) {
-        self.gem.drop_file_mappings(file_id);
-    }
-
+    /// Drop all mappings for this object owned by a given `Vm` identified by its ID.
     pub(crate) fn drop_vm_mappings(&mut self, vm_id: u64) {
         self.gem.drop_vm_mappings(vm_id);
     }
 }
 
+/// Create a new kernel-owned GEM object.
 pub(crate) fn new_kernel_object(dev: &AsahiDevice, size: usize) -> Result<ObjectRef> {
     let mut gem = shmem::Object::<DriverObject>::new(dev, size)?;
     gem.kernel = true;
@@ -172,6 +200,7 @@ pub(crate) fn new_kernel_object(dev: &AsahiDevice, size: usize) -> Result<Object
     Ok(ObjectRef::new(gem.into_ref()))
 }
 
+/// Create a new user-owned GEM object with the given flags.
 pub(crate) fn new_object(dev: &AsahiDevice, size: usize, flags: u32) -> Result<ObjectRef> {
     let mut gem = shmem::Object::<DriverObject>::new(dev, size)?;
     gem.kernel = false;
@@ -182,11 +211,13 @@ pub(crate) fn new_object(dev: &AsahiDevice, size: usize, flags: u32) -> Result<O
     Ok(ObjectRef::new(gem.into_ref()))
 }
 
+/// Look up a GEM object handle for a `File` and return an `ObjectRef` for it.
 pub(crate) fn lookup_handle(file: &DrmFile, handle: u32) -> Result<ObjectRef> {
     Ok(ObjectRef::new(shmem::Object::lookup_handle(file, handle)?))
 }
 
 impl gem::BaseDriverObject<Object> for DriverObject {
+    /// Callback to create the inner data of a GEM object
     fn new(_dev: &AsahiDevice, _size: usize) -> Result<DriverObject> {
         mod_pr_debug!("DriverObject::new\n");
         Ok(DriverObject {
@@ -196,6 +227,7 @@ impl gem::BaseDriverObject<Object> for DriverObject {
         })
     }
 
+    /// Callback to drop all mappings for a GEM object owned by a given `File`
     fn close(obj: &Object, file: &DrmFile) {
         mod_pr_debug!("DriverObject::close\n");
         obj.drop_file_mappings(file.file_id());
