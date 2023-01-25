@@ -286,13 +286,13 @@ impl<T: GpuStruct, U: Allocation<T>> Deref for GpuObject<T, U> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        &*self.inner
+        &self.inner
     }
 }
 
 impl<T: GpuStruct, U: Allocation<T>> DerefMut for GpuObject<T, U> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut *self.inner
+        &mut self.inner
     }
 }
 
