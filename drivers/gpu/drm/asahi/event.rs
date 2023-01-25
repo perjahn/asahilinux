@@ -29,6 +29,7 @@ pub(crate) type Token = slotalloc::SlotToken;
 pub(crate) type Event = slotalloc::Guard<EventInner>;
 
 #[derive(Eq, PartialEq, Copy, Clone, Debug)]
+#[repr(transparent)]
 pub(crate) struct EventValue(u32);
 
 impl EventValue {
