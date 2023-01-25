@@ -108,10 +108,10 @@ impl File {
         file: &DrmFile,
     ) -> Result<u32> {
         let gpu = &device.data().gpu;
-        let file_id = file.inner().id;
+        let file_id = file.id;
         let vm = gpu.new_vm(file_id)?;
 
-        let resv = file.inner().vms.reserve()?;
+        let resv = file.vms.reserve()?;
         let id: u32 = resv.index().try_into()?;
 
         mod_dev_dbg!(device, "[File {} VM {}]: VM Create", file_id, id);
@@ -169,7 +169,7 @@ impl File {
         data: &mut bindings::drm_asahi_vm_destroy,
         file: &DrmFile,
     ) -> Result<u32> {
-        if file.inner().vms.remove(data.vm_id as usize).is_none() {
+        if file.vms.remove(data.vm_id as usize).is_none() {
             Err(ENOENT)
         } else {
             Ok(0)
@@ -298,7 +298,6 @@ impl File {
 
         // Clone it immediately so we aren't holding the XArray lock
         let vm = file
-            .inner()
             .vms
             .get(data.vm_id.try_into()?)
             .ok_or(ENOENT)?
@@ -315,7 +314,7 @@ impl File {
         data: &mut bindings::drm_asahi_queue_create,
         file: &DrmFile,
     ) -> Result<u32> {
-        let file_id = file.inner().id;
+        let file_id = file.id;
 
         mod_dev_dbg!(
             device,
@@ -335,8 +334,8 @@ impl File {
             return Err(EINVAL);
         }
 
-        let resv = file.inner().queues.reserve()?;
-        let file_vm = file.inner().vms.get(data.vm_id.try_into()?).ok_or(ENOENT)?;
+        let resv = file.queues.reserve()?;
+        let file_vm = file.vms.get(data.vm_id.try_into()?).ok_or(ENOENT)?;
         let vm = file_vm.vm.clone();
         let ualloc = file_vm.ualloc.clone();
         let ualloc_priv = file_vm.ualloc_priv.clone();
@@ -366,7 +365,7 @@ impl File {
         data: &mut bindings::drm_asahi_queue_destroy,
         file: &DrmFile,
     ) -> Result<u32> {
-        if file.inner().queues.remove(data.queue_id as usize).is_none() {
+        if file.queues.remove(data.queue_id as usize).is_none() {
             Err(ENOENT)
         } else {
             Ok(0)
@@ -385,7 +384,6 @@ impl File {
 
         /* Upgrade to Arc<T> to drop the XArray lock early */
         let queue: Arc<Box<dyn Queue>> = file
-            .inner()
             .queues
             .get(data.queue_id.try_into()?)
             .ok_or(ENOENT)?
@@ -396,7 +394,7 @@ impl File {
         mod_dev_dbg!(
             device,
             "[File {} Queue {}]: IOCTL: submit (submission ID: {})",
-            file.inner().id,
+            file.id,
             data.queue_id,
             id
         );
