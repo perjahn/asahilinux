@@ -737,7 +737,7 @@ impl file::Queue for RenderQueue::ver {
                                 pipeline_bind: U64(cmdbuf.partial_reload_pipeline_bind as u64),
                                 address: U64(cmdbuf.partial_reload_pipeline as u64 | 4),
                             },
-                            zls_ctrl: U64(cmdbuf.zls_ctrl as u64),
+                            zls_ctrl: U64(cmdbuf.zls_ctrl),
                             unk_290: U64(0x0),
                             depth_buffer_ptr1: U64(cmdbuf.depth_buffer_1),
                             unk_2a0: U64(0x0),
