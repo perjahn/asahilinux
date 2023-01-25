@@ -379,8 +379,7 @@ impl Buffer::ver {
         inner.info.with(|raw, _inner| {
             raw.page_count.store(page_count, Ordering::Relaxed);
             raw.block_count.store(new_count as u32, Ordering::Relaxed);
-            raw.last_page
-                .store(page_count - 1, Ordering::Relaxed);
+            raw.last_page.store(page_count - 1, Ordering::Relaxed);
         });
 
         Ok(true)
