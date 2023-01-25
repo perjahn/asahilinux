@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
-#![allow(missing_docs)]
 
-//! DRM GEM shmem helpers
+//! DRM GEM shmem helper objects
 //!
 //! C header: [`include/linux/drm/drm_gem_shmem_helper.h`](../../../../include/linux/drm/drm_gem_shmem_helper.h)
 
@@ -100,6 +99,117 @@ unsafe extern "C" fn free_callback<T: DriverObject>(obj: *mut bindings::drm_gem_
     }
 }
 
+impl<T: DriverObject> Object<T> {
+    /// The size of this object's structure.
+    const SIZE: usize = mem::size_of::<Self>();
+
+    /// `drm_gem_object_funcs` vtable suitable for GEM shmem objects.
+    const VTABLE: bindings::drm_gem_object_funcs = bindings::drm_gem_object_funcs {
+        free: Some(free_callback::<T>),
+        open: Some(super::open_callback::<T, Object<T>>),
+        close: Some(super::close_callback::<T, Object<T>>),
+        print_info: Some(bindings::drm_gem_shmem_object_print_info),
+        export: None,
+        pin: Some(bindings::drm_gem_shmem_object_pin),
+        unpin: Some(bindings::drm_gem_shmem_object_unpin),
+        get_sg_table: Some(bindings::drm_gem_shmem_object_get_sg_table),
+        vmap: Some(bindings::drm_gem_shmem_object_vmap),
+        vunmap: Some(bindings::drm_gem_shmem_object_vunmap),
+        mmap: Some(bindings::drm_gem_shmem_object_mmap),
+        vm_ops: &SHMEM_VM_OPS,
+    };
+
+    // SAFETY: Must only be used with DRM functions that are thread-safe
+    unsafe fn mut_shmem(&self) -> *mut bindings::drm_gem_shmem_object {
+        &self.obj as *const _ as *mut _
+    }
+
+    /// Create a new shmem-backed DRM object of the given size.
+    pub fn new(dev: &device::Device<T::Driver>, size: usize) -> Result<gem::UniqueObjectRef<Self>> {
+        // SAFETY: This function can be called as long as the ALLOC_OPS are set properly
+        // for this driver, and the gem_create_object is called.
+        let p = unsafe { bindings::drm_gem_shmem_create(dev.raw() as *mut _, size) };
+        let p = crate::container_of!(p, Object<T>, obj) as *mut _;
+
+        // SAFETY: The gem_create_object callback ensures this is a valid Object<T>,
+        // so we can take a unique reference to it.
+        let obj_ref = gem::UniqueObjectRef { ptr: p };
+
+        Ok(obj_ref)
+    }
+
+    /// Returns the `Device` that owns this GEM object.
+    pub fn dev(&self) -> &device::Device<T::Driver> {
+        &self.dev
+    }
+
+    /// Creates (if necessary) and returns a scatter-gather table of DMA pages for this object.
+    ///
+    /// This will pin the object in memory.
+    pub fn sg_table(&self) -> Result<SGTable<T>> {
+        // SAFETY: drm_gem_shmem_get_pages_sgt is thread-safe.
+        let sgt = from_kernel_err_ptr(unsafe {
+            bindings::drm_gem_shmem_get_pages_sgt(self.mut_shmem())
+        })?;
+
+        Ok(SGTable {
+            sgt,
+            _owner: self.reference(),
+        })
+    }
+
+    /// Creates and returns a virtual kernel memory mapping for this object.
+    pub fn vmap(&self) -> Result<VMap<T>> {
+        let mut map: MaybeUninit<bindings::iosys_map> = MaybeUninit::uninit();
+
+        // SAFETY: drm_gem_shmem_vmap is thread-safe
+        to_result(unsafe { bindings::drm_gem_shmem_vmap(self.mut_shmem(), map.as_mut_ptr()) })?;
+
+        // SAFETY: if drm_gem_shmem_vmap did not fail, map is initialized now
+        let map = unsafe { map.assume_init() };
+
+        Ok(VMap {
+            map,
+            owner: self.reference(),
+        })
+    }
+
+    /// Set the write-combine flag for this object.
+    ///
+    /// Should be called before any mappings are made.
+    pub fn set_wc(&mut self, map_wc: bool) {
+        unsafe { (*self.mut_shmem()).map_wc = map_wc };
+    }
+}
+
+impl<T: DriverObject> Deref for Object<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl<T: DriverObject> DerefMut for Object<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
+}
+
+impl<T: DriverObject> private::Sealed for Object<T> {}
+
+impl<T: DriverObject> gem::IntoGEMObject for Object<T> {
+    type Driver = T::Driver;
+
+    fn gem_obj(&self) -> &bindings::drm_gem_object {
+        &self.obj.base
+    }
+
+    fn from_gem_obj(obj: *mut bindings::drm_gem_object) -> *mut Object<T> {
+        crate::container_of!(obj, Object<T>, obj) as *mut Object<T>
+    }
+}
+
 impl<T: DriverObject> drv::AllocImpl for Object<T> {
     const ALLOC_OPS: drv::AllocOps = drv::AllocOps {
         gem_create_object: Some(gem_create_object::<T>),
@@ -114,70 +224,38 @@ impl<T: DriverObject> drv::AllocImpl for Object<T> {
     };
 }
 
-// FIXME: This is terrible and I don't know how to avoid it
-#[cfg(CONFIG_NUMA)]
-macro_rules! vm_numa_fields {
-    ( $($field:ident: $val:expr),* $(,)? ) => {
-        bindings::vm_operations_struct {
-            $( $field: $val ),*,
-            set_policy: None,
-            get_policy: None,
-        }
-    }
-}
-
-#[cfg(not(CONFIG_NUMA))]
-macro_rules! vm_numa_fields {
-    ( $($field:ident: $val:expr),* $(,)? ) => {
-        bindings::vm_operations_struct {
-            $( $field: $val ),*
-        }
-    }
-}
-
-const SHMEM_VM_OPS: bindings::vm_operations_struct = vm_numa_fields! {
-    open: Some(bindings::drm_gem_shmem_vm_open),
-    close: Some(bindings::drm_gem_shmem_vm_close),
-    may_split: None,
-    mremap: None,
-    mprotect: None,
-    fault: Some(bindings::drm_gem_shmem_fault),
-    huge_fault: None,
-    map_pages: None,
-    pagesize: None,
-    page_mkwrite: None,
-    pfn_mkwrite: None,
-    access: None,
-    name: None,
-    find_special_page: None,
-};
-
+/// A virtual mapping for a shmem-backed GEM object in kernel address space.
 pub struct VMap<T: DriverObject> {
     map: bindings::iosys_map,
     owner: gem::ObjectRef<Object<T>>,
 }
 
 impl<T: DriverObject> VMap<T> {
+    /// Returns a const raw pointer to the start of the mapping.
     pub fn as_ptr(&self) -> *const core::ffi::c_void {
         // SAFETY: The shmem helpers always return non-iomem maps
         unsafe { self.map.__bindgen_anon_1.vaddr }
     }
 
+    /// Returns a mutable raw pointer to the start of the mapping.
     pub fn as_mut_ptr(&mut self) -> *mut core::ffi::c_void {
         // SAFETY: The shmem helpers always return non-iomem maps
         unsafe { self.map.__bindgen_anon_1.vaddr }
     }
 
+    /// Returns a byte slice view of the mapping.
     pub fn as_slice(&self) -> &[u8] {
         // SAFETY: The vmap maps valid memory up to the owner size
         unsafe { slice::from_raw_parts(self.as_ptr() as *const u8, self.owner.size()) }
     }
 
+    /// Returns mutable a byte slice view of the mapping.
     pub fn as_mut_slice(&mut self) -> &mut [u8] {
         // SAFETY: The vmap maps valid memory up to the owner size
         unsafe { slice::from_raw_parts_mut(self.as_mut_ptr() as *mut u8, self.owner.size()) }
     }
 
+    /// Borrows a reference to the object that owns this virtual mapping.
     pub fn owner(&self) -> &gem::ObjectRef<Object<T>> {
         &self.owner
     }
