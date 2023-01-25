@@ -227,7 +227,7 @@ impl WorkQueue::ver {
         }
 
         Ok(WorkQueueBatch::ver {
-            queue: &*this,
+            queue: this,
             wptr: inner.wptr,
             inner,
             commands: 0,
