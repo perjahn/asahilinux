@@ -1,6 +1,15 @@
 // SPDX-License-Identifier: GPL-2.0-only OR MIT
-#![allow(missing_docs)]
-#![allow(dead_code)]
+
+//! Top-level GPU manager
+//!
+//! This module is the root of all GPU firmware management for a given driver instance. It is
+//! responsible for initialization, owning the top-level managers (events, UAT, etc.), and
+//! communicating with the raw RTKit endpoints to send and receive messages to/from the GPU
+//! firmware.
+//!
+//! It is also the point where diverging driver firmware/GPU variants (using the versions macro)
+//! are unified, so that the top level of the driver itself (in `driver`) does not have to concern
+//! itself with version dependence.
 
 use core::any::Any;
 use core::sync::atomic::{AtomicU64, Ordering};
@@ -27,32 +36,53 @@ use crate::{
 
 const DEBUG_CLASS: DebugFlags = DebugFlags::Gpu;
 
+/// Firmware endpoint for init & incoming notifications.
 const EP_FIRMWARE: u8 = 0x20;
+
+/// Doorbell endpoint for work/message submissions.
 const EP_DOORBELL: u8 = 0x21;
 
+/// Initialize the GPU firmware.
 const MSG_INIT: u64 = 0x81 << 48;
 const INIT_DATA_MASK: u64 = (1 << 44) - 1;
 
+/// TX channel doorbell.
 const MSG_TX_DOORBELL: u64 = 0x83 << 48;
+/// Firmware control channel doorbell.
 const MSG_FWCTL: u64 = 0x84 << 48;
-const MSG_HALT: u64 = 0x85 << 48;
+// /// Halt the firmware (?).
+// const MSG_HALT: u64 = 0x85 << 48;
 
+/// Receive channel doorbell notification.
 const MSG_RX_DOORBELL: u64 = 0x42 << 48;
 
+/// Doorbell number for firmware kicks/wakeups.
 const DOORBELL_KICKFW: u64 = 0x10;
+/// Doorbell number for device control channel kicks.
 const DOORBELL_DEVCTRL: u64 = 0x11;
 
+// Upper kernel half VA address ranges.
+/// Private (cached) firmware structure VA range base.
 const IOVA_KERN_PRIV_BASE: u64 = 0xffffffa000000000;
+/// Private (cached) firmware structure VA range top.
 const IOVA_KERN_PRIV_TOP: u64 = 0xffffffa7ffffffff;
+/// Shared (uncached) firmware structure VA range base.
 const IOVA_KERN_SHARED_BASE: u64 = 0xffffffa800000000;
+/// Shared (uncached) firmware structure VA range top.
 const IOVA_KERN_SHARED_TOP: u64 = 0xffffffa9ffffffff;
+/// Shared (uncached) read-only firmware structure VA range base.
 const IOVA_KERN_SHARED_RO_BASE: u64 = 0xffffffaa00000000;
+/// Shared (uncached) read-only firmware structure VA range top.
 const IOVA_KERN_SHARED_RO_TOP: u64 = 0xffffffabffffffff;
+/// GPU/FW shared structure VA range base.
 const IOVA_KERN_GPU_BASE: u64 = 0xffffffaf00000000;
+/// GPU/FW shared structure VA range top.
 const IOVA_KERN_GPU_TOP: u64 = 0xffffffafffffffff;
 
+/// Timeout for entering the halt state after a fault or request.
 const HALT_ENTER_TIMEOUT_MS: u64 = 100;
 
+/// Global allocators used for kernel-half structures.
 pub(crate) struct KernelAllocators {
     pub(crate) private: alloc::DefaultAllocator,
     pub(crate) shared: alloc::DefaultAllocator,
@@ -60,6 +90,7 @@ pub(crate) struct KernelAllocators {
     pub(crate) gpu: alloc::DefaultAllocator,
 }
 
+/// Receive (GPU->driver) ring buffer channels.
 #[versions(AGX)]
 struct RxChannels {
     event: channel::EventChannel,
@@ -68,6 +99,7 @@ struct RxChannels {
     stats: channel::StatsChannel::ver,
 }
 
+/// GPU work submission pipe channels (driver->GPU).
 #[versions(AGX)]
 struct PipeChannels {
     pub(crate) vtx: Vec<Mutex<channel::PipeChannel::ver>>,
@@ -75,31 +107,40 @@ struct PipeChannels {
     pub(crate) comp: Vec<Mutex<channel::PipeChannel::ver>>,
 }
 
+/// Misc command transmit (driver->GPU) channels.
 #[versions(AGX)]
 struct TxChannels {
     pub(crate) device_control: channel::DeviceControlChannel::ver,
 }
 
+/// Number of work submission pipes per type, one for each priority level.
 const NUM_PIPES: usize = 4;
 
+/// A generic monotonically incrementing ID used to uniquely identify object instances within the
+/// driver.
 pub(crate) struct ID(AtomicU64);
 
 impl ID {
-    pub(crate) fn new(val: u64) -> ID {
+    /// Create a new ID counter with a given value.
+    fn new(val: u64) -> ID {
         ID(AtomicU64::new(val))
     }
 
+    /// Fetch the next unique ID.
     pub(crate) fn next(&self) -> u64 {
         self.0.fetch_add(1, Ordering::Relaxed)
     }
 }
 
 impl Default for ID {
+    /// IDs default to starting at 2, as 0/1 are considered reserved for the system.
     fn default() -> Self {
-        ID(AtomicU64::new(2))
+        Self::new(2)
     }
 }
 
+/// A guard representing one active submission on the GPU. When dropped, decrements the active
+/// submission count.
 pub(crate) struct OpGuard<'a>(&'a dyn GpuManagerPriv);
 
 impl<'a> Drop for OpGuard<'a> {
@@ -108,21 +149,25 @@ impl<'a> Drop for OpGuard<'a> {
     }
 }
 
+/// Set of global sequence IDs used in the driver.
 #[derive(Default)]
 pub(crate) struct SequenceIDs {
+    /// `File` instance ID.
     pub(crate) file: ID,
+    /// `Vm` instance ID.
     pub(crate) vm: ID,
-    pub(crate) buf: ID,
+    /// Submission instance ID.
     pub(crate) submission: ID,
+    /// `Queue` instance ID.
     pub(crate) queue: ID,
 }
 
+/// Top-level GPU manager that owns all the global state relevant to the driver instance.
 #[versions(AGX)]
 pub(crate) struct GpuManager {
     dev: AsahiDevice,
     cfg: &'static hw::HwConfig,
     dyncfg: Box<hw::DynConfig>,
-    initialized: bool,
     pub(crate) initdata: Box<fw::types::GpuObject<fw::initdata::InitData::ver>>,
     uat: Box<mmu::Uat>,
     alloc: Mutex<KernelAllocators>,
@@ -137,13 +182,23 @@ pub(crate) struct GpuManager {
     ids: SequenceIDs,
 }
 
+/// Trait used to abstract the firmware/GPU-dependent variants of the GpuManager.
 pub(crate) trait GpuManager: Send + Sync {
+    /// Cast as an Any type.
     fn as_any(&self) -> &dyn Any;
+    /// Initialize the GPU.
     fn init(&self) -> Result;
+    /// Update the GPU globals from global info
+    ///
+    /// TODO: Unclear what can and cannot be updated like this.
     fn update_globals(&self);
+    /// Get a reference to the KernelAllocators.
     fn alloc(&self) -> Guard<'_, Mutex<KernelAllocators>>;
+    /// Create a new `Vm` given a unique `File` ID.
     fn new_vm(&self, file_id: u64) -> Result<mmu::Vm>;
+    /// Bind a `Vm` to an available slot and return the `VmBind`.
     fn bind_vm(&self, vm: &mmu::Vm) -> Result<mmu::VmBind>;
+    /// Create a new render command queue.
     fn new_render_queue(
         &self,
         vm: mmu::Vm,
@@ -151,29 +206,49 @@ pub(crate) trait GpuManager: Send + Sync {
         ualloc_priv: Arc<Mutex<alloc::DefaultAllocator>>,
         priority: u32,
     ) -> Result<Box<dyn file::Queue>>;
+    /// Create a new compute command queue.
     fn new_compute_queue(
         &self,
         vm: mmu::Vm,
         ualloc: Arc<Mutex<alloc::DefaultAllocator>>,
         priority: u32,
     ) -> Result<Box<dyn file::Queue>>;
+    /// Return a reference to the global `SequenceIDs` instance.
     fn ids(&self) -> &SequenceIDs;
+    /// Kick the firmware (wake it up if asleep).
+    ///
+    /// This should be useful to reduce latency on work submission, so we can ask the firmware to
+    /// wake up while we do some preparatory work for the work submission.
     fn kick_firmware(&self) -> Result;
+    /// Invalidate a GPU scheduler context. Must be called before the relevant structures are freed.
     fn invalidate_context(
         &self,
         context: &fw::types::GpuObject<fw::workqueue::GpuContextData>,
     ) -> Result;
+    /// Flush the entire firmware cache.
+    ///
+    /// TODO: Does this actually work?
     fn flush_fw_cache(&self) -> Result;
+    /// Handle a GPU work timeout event.
     fn handle_timeout(&self, counter: u32, event_slot: u32);
+    /// Handle a GPU fault event.
     fn handle_fault(&self);
+    /// Wait for the GPU to become idle and power off.
     fn wait_for_poweroff(&self, timeout: usize) -> Result;
+    /// Send a firmware control command (secure cache flush).
     fn fwctl(&self, msg: fw::channels::FwCtlMsg) -> Result;
+    /// Get the static GPU configuration for this SoC.
     fn get_cfg(&self) -> &'static hw::HwConfig;
+    /// Get the dynamic GPU configuration for this SoC.
     fn get_dyncfg(&self) -> &hw::DynConfig;
+    /// Increment the pending submission counter and notify the GPU firmware, returning a guard to
+    /// decrement the counter when dropped.
     fn start_op(&self) -> Result<OpGuard<'_>>;
 }
 
+/// Private generic trait for functions that don't need to escape this module.
 trait GpuManagerPriv {
+    /// Decrement the pending submission counter.
     fn end_op(&self);
 }
 
@@ -217,6 +292,7 @@ impl rtkit::Operations for GpuManager::ver {
 
 #[versions(AGX)]
 impl GpuManager::ver {
+    /// Create a new GpuManager of this version/GPU combination.
     #[inline(never)]
     pub(crate) fn new(
         dev: &AsahiDevice,
@@ -363,6 +439,7 @@ impl GpuManager::ver {
         Ok(mgr)
     }
 
+    /// Build the entire GPU InitData structure tree and return it as a boxed GpuObject.
     fn make_initdata(
         cfg: &'static hw::HwConfig,
         dyncfg: &hw::DynConfig,
@@ -372,11 +449,17 @@ impl GpuManager::ver {
         builder.build()
     }
 
+    /// Create a fresh boxed Uat instance.
+    ///
+    /// Force disable inlining to avoid blowing up the stack.
     #[inline(never)]
     fn make_uat(dev: &AsahiDevice, cfg: &'static hw::HwConfig) -> Result<Box<mmu::Uat>> {
         Ok(Box::try_new(mmu::Uat::new(dev, cfg)?)?)
     }
 
+    /// Actually create the final GpuManager instance, as a UniqueArc.
+    ///
+    /// Force disable inlining to avoid blowing up the stack.
     #[inline(never)]
     fn make_mgr(
         dev: &AsahiDevice,
@@ -409,7 +492,6 @@ impl GpuManager::ver {
             dev: dev.clone(),
             cfg,
             dyncfg,
-            initialized: false,
             initdata,
             uat,
             io_mappings: Vec::new(),
@@ -432,6 +514,9 @@ impl GpuManager::ver {
         })
     }
 
+    /// Fetch and validate the GPU dynamic configuration from the device tree and hardware.
+    ///
+    /// Force disable inlining to avoid blowing up the stack.
     #[inline(never)]
     fn make_dyncfg(
         dev: &AsahiDevice,
@@ -530,10 +615,13 @@ impl GpuManager::ver {
         })?)
     }
 
+    /// Create the global GPU event manager, and return an `Arc<>` to it.
     fn make_event_manager(alloc: &mut KernelAllocators) -> Result<Arc<event::EventManager>> {
         Arc::try_new(event::EventManager::new(alloc)?)
     }
 
+    /// Create a new MMIO mapping and add it to the mappings list in initdata at the specified
+    /// index.
     fn iomap(&mut self, index: usize, map: &hw::IOMapping) -> Result {
         let off = map.base & mmu::UAT_PGMSK;
         let base = map.base - off;
@@ -557,6 +645,8 @@ impl GpuManager::ver {
         Ok(())
     }
 
+    /// Mark work associated with currently in-progress event slots as failed, after a fault or
+    /// timeout.
     fn mark_pending_events(&self, culprit_slot: Option<u32>, error: workqueue::BatchError) {
         dev_err!(self.dev, "  Pending events:\n");
 
@@ -588,6 +678,7 @@ impl GpuManager::ver {
         });
     }
 
+    /// Fetch the GPU MMU fault information from the hardware registers.
     fn get_fault_info(&self) -> Option<regs::FaultInfo> {
         let data = self.dev.data();
 
@@ -606,6 +697,7 @@ impl GpuManager::ver {
         info
     }
 
+    /// Resume the GPU firmware after it halts (due to a timeout, fault, or request).
     fn recover(&self) {
         self.initdata.fw_status.with(|raw, _inner| {
             let halt_count = raw.flags.halt_count.load(Ordering::Relaxed);
@@ -637,10 +729,14 @@ impl GpuManager::ver {
         });
     }
 
+    /// Return the packed GPU enabled core masks.
+    // Only used for some versions
+    #[allow(dead_code)]
     pub(crate) fn core_masks_packed(&self) -> &[u32] {
         self.dyncfg.id.core_masks_packed.as_slice()
     }
 
+    /// Submit a batch to a submission pipe to tell the firmware to start processing it.
     pub(crate) fn submit_batch(&self, batch: workqueue::BatchBuilder::ver<'_>) -> Result {
         let pipe_type = batch.pipe_type();
         let pipes = match pipe_type {
