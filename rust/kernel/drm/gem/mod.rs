@@ -282,6 +282,10 @@ pub struct ObjectRef<T: IntoGEMObject> {
     ptr: *const T,
 }
 
+/// SAFETY: GEM object references are safe to share between threads.
+unsafe impl<T: IntoGEMObject> Send for ObjectRef<T> {}
+unsafe impl<T: IntoGEMObject> Sync for ObjectRef<T> {}
+
 impl<T: IntoGEMObject> Clone for ObjectRef<T> {
     fn clone(&self) -> Self {
         self.reference()

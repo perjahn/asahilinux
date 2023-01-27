@@ -299,6 +299,10 @@ impl<T: DriverObject> Drop for VMap<T> {
     }
 }
 
+/// SAFETY: `iosys_map` objects are safe to send across threads.
+unsafe impl<T: DriverObject> Send for VMap<T> {}
+unsafe impl<T: DriverObject> Sync for VMap<T> {}
+
 /// A single scatter-gather entry, representing a span of pages in the device's DMA address space.
 ///
 /// For devices not behind a standalone IOMMU, this corresponds to physical addresses.
