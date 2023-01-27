@@ -66,6 +66,10 @@ pub(crate) struct Batch {
     error: smutex::Mutex<Option<BatchError>>,
 }
 
+/// SAFETY: The bindings::completion is safe to send/share across threads
+unsafe impl Send for Batch {}
+unsafe impl Sync for Batch {}
+
 impl Batch {
     /// Wait for the batch to complete execution and return the execution status.
     pub(crate) fn wait(&self) -> core::result::Result<(), BatchError> {
@@ -84,16 +88,12 @@ struct WorkQueueInner {
     pipe_type: PipeType,
     size: u32,
     wptr: u32,
-    pending: Vec<Box<dyn object::OpaqueGpuObject>>,
+    pending: Vec<Box<dyn object::OpaqueGpuObject + Send + Sync>>,
     batches: Vec<Arc<Batch>>,
     last_token: Option<event::Token>,
     event: Option<(event::Event, event::EventValue)>,
     priority: u32,
 }
-
-// SAFETY: We only expose thread-safe methods.
-#[versions(AGX)]
-unsafe impl Send for WorkQueueInner::ver {}
 
 /// An instance of a work queue.
 #[versions(AGX)]

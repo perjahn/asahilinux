@@ -44,11 +44,6 @@ pub(crate) struct ComputeQueue {
 }
 
 #[versions(AGX)]
-unsafe impl Send for ComputeQueue::ver {}
-#[versions(AGX)]
-unsafe impl Sync for ComputeQueue::ver {}
-
-#[versions(AGX)]
 impl ComputeQueue::ver {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(

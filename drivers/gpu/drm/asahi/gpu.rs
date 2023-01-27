@@ -962,9 +962,3 @@ impl GpuManagerPriv for GpuManager::ver {
         mod_dev_dbg!(self.dev, "OP end (pending: {})\n", val - 1);
     }
 }
-
-#[versions(AGX)]
-unsafe impl Sync for GpuManager::ver {}
-
-#[versions(AGX)]
-unsafe impl Send for GpuManager::ver {}

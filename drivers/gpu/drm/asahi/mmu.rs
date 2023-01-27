@@ -123,6 +123,10 @@ struct UatRegion {
     map: NonNull<core::ffi::c_void>,
 }
 
+/// It's safe to share UAT region records across threads.
+unsafe impl Send for UatRegion {}
+unsafe impl Sync for UatRegion {}
+
 /// Handoff region flush info structure
 #[repr(C)]
 struct FlushInfo {
@@ -1222,7 +1226,3 @@ impl Drop for Uat {
         mem::sync();
     }
 }
-
-// SAFETY: All public operations are thread-safe
-unsafe impl Send for Uat {}
-unsafe impl Sync for Uat {}

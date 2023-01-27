@@ -44,11 +44,6 @@ pub(crate) struct RenderQueue {
 }
 
 #[versions(AGX)]
-unsafe impl Send for RenderQueue::ver {}
-#[versions(AGX)]
-unsafe impl Sync for RenderQueue::ver {}
-
-#[versions(AGX)]
 impl RenderQueue::ver {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(

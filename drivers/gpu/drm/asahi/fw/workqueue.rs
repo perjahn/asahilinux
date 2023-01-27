@@ -20,7 +20,7 @@ pub(crate) enum CommandType {
     InitBuffer = 6,
 }
 
-pub(crate) trait Command: GpuStruct {}
+pub(crate) trait Command: GpuStruct + Send + Sync {}
 
 pub(crate) mod raw {
     use super::*;

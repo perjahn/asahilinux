@@ -32,6 +32,9 @@ pub(crate) struct EventInner {
     gpu_fw_stamp: GpuWeakPointer<FwStamp>,
 }
 
+/// SAFETY: The event slots are safe to send across threads.
+unsafe impl Send for EventInner {}
+
 /// Alias for an event token, which allows requesting the same event.
 pub(crate) type Token = slotalloc::SlotToken;
 /// Alias for an allocated `Event` that has a slot.
@@ -113,7 +116,7 @@ pub(crate) struct EventManagerInner {
     stamps: GpuArray<Stamp>,
     fw_stamps: GpuArray<FwStamp>,
     // Note: Use dyn to avoid having to version this entire module.
-    owners: Vec<Option<Arc<dyn workqueue::WorkQueue>>>,
+    owners: Vec<Option<Arc<dyn workqueue::WorkQueue + Send + Sync>>>,
 }
 
 /// Top-level EventManager object.
@@ -152,7 +155,7 @@ impl EventManager {
     pub(crate) fn get(
         &self,
         token: Option<Token>,
-        owner: Arc<dyn workqueue::WorkQueue>,
+        owner: Arc<dyn workqueue::WorkQueue + Send + Sync>,
     ) -> Result<Event> {
         let ev = self.alloc.get_inner(token, |inner, ev| {
             mod_pr_debug!(
@@ -196,7 +199,3 @@ impl EventManager {
         }
     }
 }
-
-// SAFETY: All methods are thread-safe.
-unsafe impl Send for EventManager {}
-unsafe impl Sync for EventManager {}
