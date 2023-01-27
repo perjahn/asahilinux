@@ -27,7 +27,6 @@ pub(crate) enum DebugFlags {
     Render = 9,
     Compute = 10,
     Gpu = 11,
-    Init = 12,
 
     // 14-15: Misc stats
     MemStats = 14,

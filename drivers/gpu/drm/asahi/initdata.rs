@@ -1,11 +1,16 @@
 // SPDX-License-Identifier: GPL-2.0-only OR MIT
-#![allow(missing_docs)]
-#![allow(dead_code)]
 #![allow(clippy::unusual_byte_groupings)]
 
-//! GPU initialization data builder
+//! GPU initialization data builder.
+//!
+//! The root of all interaction between the GPU firmware and the host driver is a complex set of
+//! nested structures that we call InitData. This includes both GPU hardware/firmware configuration
+//! and the pointers to the ring buffers and global data fields that are used for communication at
+//! runtime.
+//!
+//! Many of these structures are poorly understood, so there are lots of hardcoded unknown values
+//! derived from observing the InitData structures that macOS generates.
 
-use crate::debug::*;
 use crate::fw::initdata::*;
 use crate::fw::types::*;
 use crate::{box_in_place, f32, place};
@@ -13,8 +18,7 @@ use crate::{gpu, hw, mmu};
 use kernel::error::Result;
 use kernel::macros::versions;
 
-const DEBUG_CLASS: DebugFlags = DebugFlags::Init;
-
+/// Builder helper for the global GPU InitData.
 #[versions(AGX)]
 pub(crate) struct InitDataBuilder<'a> {
     alloc: &'a mut gpu::KernelAllocators,
@@ -24,6 +28,7 @@ pub(crate) struct InitDataBuilder<'a> {
 
 #[versions(AGX)]
 impl<'a> InitDataBuilder::ver<'a> {
+    /// Create a new InitData builder
     pub(crate) fn new(
         alloc: &'a mut gpu::KernelAllocators,
         cfg: &'a hw::HwConfig,
@@ -32,6 +37,7 @@ impl<'a> InitDataBuilder::ver<'a> {
         InitDataBuilder::ver { alloc, cfg, dyncfg }
     }
 
+    /// Create the HwDataShared1 structure, which is used in two places in InitData.
     #[inline(never)]
     fn hw_shared1(cfg: &hw::HwConfig) -> raw::HwDataShared1 {
         let mut ret = raw::HwDataShared1 {
@@ -67,6 +73,7 @@ impl<'a> InitDataBuilder::ver<'a> {
         }
     }
 
+    /// Create the HwDataShared2 structure, which is used in two places in InitData.
     #[inline(never)]
     fn hw_shared2(cfg: &hw::HwConfig) -> Result<Box<raw::HwDataShared2>> {
         let mut ret = box_in_place!(raw::HwDataShared2 {
@@ -106,6 +113,7 @@ impl<'a> InitDataBuilder::ver<'a> {
         Ok(ret)
     }
 
+    /// Create the HwDataShared3 structure, which is used in two places in InitData.
     #[inline(never)]
     fn hw_shared3(cfg: &hw::HwConfig) -> Result<Box<raw::HwDataShared3>> {
         let mut ret = box_in_place!(raw::HwDataShared3 {
@@ -126,6 +134,7 @@ impl<'a> InitDataBuilder::ver<'a> {
         Ok(ret)
     }
 
+    /// Create an unknown T81xx-specific data structure.
     fn t81xx_data(dyncfg: &'a hw::DynConfig) -> raw::T81xxData {
         raw::T81xxData {
             unk_d8c: 0x80000000,
@@ -140,6 +149,7 @@ impl<'a> InitDataBuilder::ver<'a> {
         }
     }
 
+    /// Create the HwDataA structure. This mostly contains power-related configuration.
     #[inline(never)]
     fn hwdata_a(&mut self) -> Result<GpuObject<HwDataA::ver>> {
         self.alloc
@@ -379,6 +389,7 @@ impl<'a> InitDataBuilder::ver<'a> {
             })
     }
 
+    /// Create the HwDataB structure. This mostly contains GPU-related configuration.
     #[inline(never)]
     fn hwdata_b(&mut self) -> Result<GpuObject<HwDataB::ver>> {
         self.alloc
@@ -485,6 +496,8 @@ impl<'a> InitDataBuilder::ver<'a> {
             })
     }
 
+    /// Create the Globals structure, which contains global firmware config including more power
+    /// configuration data and globals used to exchange state between the firmware and driver.
     #[inline(never)]
     fn globals(&mut self) -> Result<GpuObject<Globals::ver>> {
         self.alloc
@@ -601,32 +614,8 @@ impl<'a> InitDataBuilder::ver<'a> {
             })
     }
 
-    #[inline(never)]
-    fn make_channel<T: GpuStruct + Debug + Default, U: Copy + Default>(
-        &mut self,
-        count: usize,
-        rx: bool,
-    ) -> Result<ChannelRing<T, U>>
-    where
-        for<'b> <T as GpuStruct>::Raw<'b>: Default + Debug,
-    {
-        let ring_alloc = if rx {
-            &mut self.alloc.shared
-        } else {
-            &mut self.alloc.private
-        };
-
-        let ring = ring_alloc.array_empty(count)?;
-
-        Ok(ChannelRing {
-            state: self
-                .alloc
-                .shared
-                .new_object(Default::default(), |_inner| Default::default())?,
-            ring,
-        })
-    }
-
+    /// Create the RuntimePointers structure, which contains pointers to most of the other
+    /// structures including the ring buffer channels, statistics structures, and HwDataA/HwDataB.
     #[inline(never)]
     fn runtime_pointers(&mut self) -> Result<GpuObject<RuntimePointers::ver>> {
         let hwa = self.hwdata_a()?;
@@ -713,6 +702,8 @@ impl<'a> InitDataBuilder::ver<'a> {
         })
     }
 
+    /// Create the FwStatus structure, which is used to coordinate the firmware halt state between
+    /// the firmware and the driver.
     #[inline(never)]
     fn fw_status(&mut self) -> Result<GpuObject<FwStatus>> {
         self.alloc
@@ -720,6 +711,7 @@ impl<'a> InitDataBuilder::ver<'a> {
             .new_object(Default::default(), |_inner| Default::default())
     }
 
+    /// Create one UatLevelInfo structure, which describes one level of translation for the UAT MMU.
     #[inline(never)]
     fn uat_level_info(
         cfg: &hw::HwConfig,
@@ -739,6 +731,7 @@ impl<'a> InitDataBuilder::ver<'a> {
         }
     }
 
+    /// Build the top-level InitData object.
     #[inline(never)]
     pub(crate) fn build(&mut self) -> Result<Box<GpuObject<InitData::ver>>> {
         let inner: Box<InitData::ver> = box_in_place!(InitData::ver {
