@@ -29,11 +29,11 @@ macro_rules! place {
     // Zero-initialize structure if the initializer ends in ..default::Default()
     (@STRUCT_ZERO $ptr:ident, {$($typ_init:tt)*} { $($f:ident $(: $v:expr)?),* $(,)? }) => {};
     (@STRUCT_ZERO $ptr:ident, {$($typ_init:tt)*} { $($($f:ident $(: $v:expr)?),*,)? ..Default::default() }) => {{
-        // Check that the structure actually implements Default
+        // Check that the structure actually implements Zeroed
         const _: () = {
             fn _check_default() {
                 let _ = $($typ_init)* {
-                    ..Default::default()
+                    ..Zeroed::zeroed()
                 };
             }
         };
@@ -51,7 +51,7 @@ macro_rules! place {
                     $f $(: $v)?
                 ),*
                 ,)?
-                ..Default::default()
+                ..Zeroed::zeroed()
             };
         } else {
             {$($body)*}
@@ -181,12 +181,13 @@ mod tests {
         z: foo::MyCoolGenericStruct<bool, String>,
     }
 
-    #[derive(Debug, Default, PartialEq)]
+    #[derive(Debug, PartialEq)]
     struct MyDefaultStruct {
         b: bool,
         i: i32,
         j: i16,
     }
+    default_zeroed!(MyDefaultStruct);
 
     mod foo {
         #[derive(Debug, PartialEq)]

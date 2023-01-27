@@ -52,7 +52,7 @@ pub(crate) mod raw {
         pub(crate) flags: FwStatusFlags,
     }
 
-    #[derive(Debug, Default)]
+    #[derive(Debug)]
     #[repr(C)]
     pub(crate) struct HwDataShared1 {
         pub(crate) table: Array<16, i32>,
@@ -60,6 +60,7 @@ pub(crate) mod raw {
         pub(crate) unk_a4: u32,
         pub(crate) unk_a8: u32,
     }
+    default_zeroed!(HwDataShared1);
 
     #[derive(Debug, Default)]
     #[repr(C)]
@@ -81,7 +82,7 @@ pub(crate) mod raw {
         pub(crate) curve2: HwDataShared2Curve,
     }
 
-    #[derive(Debug, Default)]
+    #[derive(Debug)]
     #[repr(C)]
     pub(crate) struct HwDataShared2 {
         pub(crate) table: Array<10, i32>,
@@ -93,8 +94,9 @@ pub(crate) mod raw {
         pub(crate) unk_50c: u32,
         pub(crate) unk_510: u32,
     }
+    default_zeroed!(HwDataShared2);
 
-    #[derive(Debug, Default)]
+    #[derive(Debug)]
     #[repr(C)]
     pub(crate) struct HwDataShared3 {
         pub(crate) unk_0: u32,
@@ -103,8 +105,9 @@ pub(crate) mod raw {
         pub(crate) table: Array<16, u32>,
         pub(crate) unk_4c: u32,
     }
+    default_zeroed!(HwDataShared3);
 
-    #[derive(Debug, Default)]
+    #[derive(Debug)]
     #[repr(C)]
     pub(crate) struct HwDataA130Extra {
         pub(crate) unk_0: Array<0x38, u8>,
@@ -153,6 +156,7 @@ pub(crate) mod raw {
         pub(crate) max_pstate_scaled_2: u32,
         pub(crate) unk_12c: Array<0x8c, u8>,
     }
+    default_zeroed!(HwDataA130Extra);
 
     #[derive(Default)]
     #[repr(C)]
@@ -195,7 +199,6 @@ pub(crate) mod raw {
     }
 
     #[versions(AGX)]
-    #[derive(Default)]
     #[repr(C)]
     pub(crate) struct HwDataA {
         pub(crate) unk_0: u32,
@@ -530,7 +533,8 @@ pub(crate) mod raw {
         #[ver(V >= V13_0B4)]
         pub(crate) unk_3d6c: Array<0x38, u8>,
     }
-
+    #[versions(AGX)]
+    default_zeroed!(HwDataA::ver);
     #[versions(AGX)]
     no_debug!(HwDataA::ver);
 
@@ -545,7 +549,7 @@ pub(crate) mod raw {
     }
 
     #[versions(AGX)]
-    #[derive(Debug, Default)]
+    #[derive(Debug)]
     #[repr(C)]
     pub(crate) struct HwDataB {
         #[ver(V < V13_0B4)]
@@ -715,6 +719,8 @@ pub(crate) mod raw {
         #[ver(V >= V13_0B4)]
         pub(crate) unk_c3c: u32,
     }
+    #[versions(AGX)]
+    default_zeroed!(HwDataB::ver);
 
     #[derive(Debug, Default, Clone, Copy)]
     #[repr(C, packed)]
@@ -750,7 +756,7 @@ pub(crate) mod raw {
     }
 
     #[versions(AGX)]
-    #[derive(Debug, Default)]
+    #[derive(Debug)]
     #[repr(C)]
     pub(crate) struct GpuStatsFrag {
         pub(crate) unk_0: Array<0x18, u8>,
@@ -771,6 +777,8 @@ pub(crate) mod raw {
         pub(crate) unk_timestamp: u64,
         pub(crate) unk_134: Array<0x8c, u8>,
     }
+    #[versions(AGX)]
+    default_zeroed!(GpuStatsFrag::ver);
 
     #[versions(AGX)]
     #[derive(Debug)]
@@ -785,7 +793,7 @@ pub(crate) mod raw {
     default_zeroed!(GpuGlobalStatsVtx::ver);
 
     #[versions(AGX)]
-    #[derive(Debug, Default)]
+    #[derive(Debug)]
     #[repr(C)]
     pub(crate) struct GpuGlobalStatsFrag {
         pub(crate) total_cmds: u32,
@@ -794,6 +802,8 @@ pub(crate) mod raw {
         #[ver(V >= V13_0B4)]
         pub(crate) unk_pad: Array<0x580, u8>,
     }
+    #[versions(AGX)]
+    default_zeroed!(GpuGlobalStatsFrag::ver);
 
     #[derive(Debug)]
     #[repr(C)]
@@ -802,7 +812,7 @@ pub(crate) mod raw {
     }
     default_zeroed!(GpuStatsComp);
 
-    #[derive(Debug, Default)]
+    #[derive(Debug)]
     #[repr(C)]
     pub(crate) struct RuntimeScratch {
         pub(crate) unk_280: Array<0x6800, u8>,
@@ -838,6 +848,7 @@ pub(crate) mod raw {
         pub(crate) unk_6b38: u32,
         pub(crate) pad_6b3c: Pad<0x84>,
     }
+    default_zeroed!(RuntimeScratch);
 
     pub(crate) type BufferMgrCtl = Array<4, u32>;
 
@@ -879,14 +890,15 @@ pub(crate) mod raw {
     #[versions(AGX)]
     no_debug!(RuntimePointers::ver<'_>);
 
-    #[derive(Debug, Default)]
+    #[derive(Debug)]
     #[repr(C)]
     pub(crate) struct PendingStamp {
         pub(crate) info: AtomicU32,
         pub(crate) wait_value: AtomicU32,
     }
+    default_zeroed!(PendingStamp);
 
-    #[derive(Debug, Default, Clone, Copy)]
+    #[derive(Debug, Clone, Copy)]
     #[repr(C, packed)]
     pub(crate) struct FaultInfo {
         pub(crate) unk_0: u32,
@@ -896,9 +908,10 @@ pub(crate) mod raw {
         pub(crate) unk_10: u32,
         pub(crate) unk_14: u32,
     }
+    default_zeroed!(FaultInfo);
 
     #[versions(AGX)]
-    #[derive(Debug, Default, Clone, Copy)]
+    #[derive(Debug, Clone, Copy)]
     #[repr(C, packed)]
     pub(crate) struct GlobalsSub {
         pub(crate) unk_54: u16,
@@ -914,17 +927,20 @@ pub(crate) mod raw {
         pub(crate) unk_66: u32,
         pub(crate) unk_6a: Array<0x16, u8>,
     }
+    #[versions(AGX)]
+    default_zeroed!(GlobalsSub::ver);
 
-    #[derive(Debug, Default, Clone, Copy)]
+    #[derive(Debug, Clone, Copy)]
     #[repr(C)]
     pub(crate) struct PowerZoneGlobal {
         pub(crate) target: u32,
         pub(crate) target_off: u32,
         pub(crate) filter_tc: u32,
     }
+    default_zeroed!(PowerZoneGlobal);
 
     #[versions(AGX)]
-    #[derive(Debug, Default)]
+    #[derive(Debug)]
     #[repr(C)]
     pub(crate) struct Globals {
         pub(crate) ktrace_enable: u32,
@@ -1083,6 +1099,8 @@ pub(crate) mod raw {
         #[ver(V >= V13_0B4)]
         pub(crate) unk_11efc: u32,
     }
+    #[versions(AGX)]
+    default_zeroed!(Globals::ver);
 
     #[derive(Debug, Default, Clone, Copy)]
     #[repr(C, packed)]
