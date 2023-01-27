@@ -290,8 +290,6 @@ impl file::Queue for RenderQueue::ver {
             tiling_control
         };
 
-        self.buffer.increment();
-
         let mut alloc = gpu.alloc();
         let kalloc = &mut *alloc;
 
@@ -1144,19 +1142,22 @@ impl file::Queue for RenderQueue::ver {
 
         core::mem::drop(alloc);
 
-        notifier.threshold.with(|raw, _inner| {
-            raw.increment();
-        });
         batches_frag.add(Box::try_new(frag)?)?;
-        let batch_frag = batches_frag.commit()?;
+        batches_vtx.add(Box::try_new(vtx)?)?;
 
         notifier.threshold.with(|raw, _inner| {
             raw.increment();
+            raw.increment();
         });
-        batches_vtx.add(Box::try_new(vtx)?)?;
+        self.buffer.increment();
+
+        // TODO: This can fail and leave the buffer manager with an inconsistent usage count, fix when
+        // we rework the submission stuff.
+        let batch_frag = batches_frag.commit()?;
         let batch_vtx = batches_vtx.commit()?;
 
         let _op_guard = gpu.start_op()?;
+
         mod_dev_dbg!(self.dev, "[Submission {}] Submit frag!\n", id);
         gpu.submit_batch(batches_frag)?;
         mod_dev_dbg!(self.dev, "[Submission {}] Submit vert!\n", id);
