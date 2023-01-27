@@ -26,7 +26,7 @@ pub(crate) const PAGES_PER_BLOCK: usize = 4;
 pub(crate) const BLOCK_SIZE: usize = PAGE_SIZE * PAGES_PER_BLOCK;
 
 #[versions(AGX)]
-pub(crate) struct BufferInner {
+struct BufferInner {
     info: GpuObject<buffer::Info::ver>,
     ualloc: Arc<Mutex<alloc::DefaultAllocator>>,
     ualloc_priv: Arc<Mutex<alloc::DefaultAllocator>>,
@@ -105,11 +105,11 @@ impl Scene::ver {
     }
 
     pub(crate) fn kernel_buffer_pointer(&self) -> GpuWeakPointer<[u8]> {
-        self.object.buffer.lock().kernel_buffer.weak_pointer()
+        self.object.buffer.inner.lock().kernel_buffer.weak_pointer()
     }
 
     pub(crate) fn buffer_pointer(&self) -> GpuWeakPointer<buffer::Info::ver> {
-        self.object.buffer.lock().info.weak_pointer()
+        self.object.buffer.inner.lock().info.weak_pointer()
     }
 
     pub(crate) fn tvb_heapmeta_pointer(&self) -> GpuPointer<'_, &'_ [u8]> {
@@ -465,7 +465,7 @@ impl Buffer::ver {
 
         let scene_inner = box_in_place!(buffer::Scene::ver {
             user_buffer: user_buffer,
-            buffer: self.inner.clone(),
+            buffer: self.clone(),
             tvb_heapmeta: tvb_heapmeta,
             tvb_tilemap: tvb_tilemap,
             tpc: tpc,
@@ -555,7 +555,7 @@ impl Clone for Buffer::ver {
 #[versions(AGX)]
 impl Drop for Scene::ver {
     fn drop(&mut self) {
-        let mut inner = self.object.buffer.lock();
+        let mut inner = self.object.buffer.inner.lock();
         assert_ne!(inner.active_scenes, 0);
         inner.active_scenes -= 1;
 

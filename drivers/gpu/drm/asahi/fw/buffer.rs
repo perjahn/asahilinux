@@ -7,7 +7,7 @@
 use super::types::*;
 use super::workqueue;
 use crate::{no_debug, trivial_gpustruct};
-use kernel::sync::{smutex::Mutex, Arc};
+use kernel::sync::Arc;
 
 pub(crate) mod raw {
     use super::*;
@@ -135,7 +135,7 @@ pub(crate) struct ClusterBuffers {
 #[versions(AGX)]
 pub(crate) struct Scene {
     pub(crate) user_buffer: GpuArray<u8>,
-    pub(crate) buffer: Arc<Mutex<crate::buffer::BufferInner::ver>>,
+    pub(crate) buffer: crate::buffer::Buffer::ver,
     pub(crate) tvb_heapmeta: GpuArray<u8>,
     pub(crate) tvb_tilemap: GpuArray<u8>,
     pub(crate) tpc: Arc<GpuArray<u8>>,
