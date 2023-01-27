@@ -15,6 +15,7 @@ use kernel::{
 
 use crate::debug::*;
 use crate::driver::AsahiDevice;
+use crate::fw::types::Zeroed;
 use crate::mmu;
 use crate::object::{GpuArray, GpuObject, GpuOnlyArray, GpuStruct, GpuWeakPointer};
 
@@ -202,7 +203,7 @@ pub(crate) trait Allocator {
         &mut self,
     ) -> Result<GpuObject<T, GenericAlloc<T, Self::Raw>>>
     where
-        for<'a> <T as GpuStruct>::Raw<'a>: Default,
+        for<'a> <T as GpuStruct>::Raw<'a>: Default + Zeroed,
     {
         GpuObject::<T, GenericAlloc<T, Self::Raw>>::new_default(self.alloc_object()?)
     }

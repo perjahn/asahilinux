@@ -31,11 +31,13 @@ pub(crate) mod raw {
         __pad1: Pad<0xc>,
         _p: PhantomData<&'a ()>,
     }
-
     default_zeroed!(<'a>, FwCtlChannelState<'a>);
 }
 
-pub(crate) trait RxChannelState: GpuStruct + Debug + Default {
+pub(crate) trait RxChannelState: GpuStruct + Debug + Default
+where
+    for<'a> <Self as GpuStruct>::Raw<'a>: Default + Zeroed,
+{
     const SUB_CHANNELS: usize;
 
     fn wptr(raw: &Self::Raw<'_>, index: usize) -> u32;
@@ -65,7 +67,7 @@ impl RxChannelState for ChannelState {
 pub(crate) struct FwLogChannelState {}
 
 impl GpuStruct for FwLogChannelState {
-    type Raw<'a> = Array<{ Self::SUB_CHANNELS }, raw::ChannelState<'a>>;
+    type Raw<'a> = Array<6, raw::ChannelState<'a>>;
 }
 
 impl RxChannelState for FwLogChannelState {

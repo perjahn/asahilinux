@@ -5,7 +5,7 @@
 //! GPU events & stamps
 
 use super::types::*;
-use crate::trivial_gpustruct;
+use crate::{default_zeroed, trivial_gpustruct};
 use core::sync::atomic::Ordering;
 
 pub(crate) mod raw {
@@ -18,12 +18,13 @@ pub(crate) mod raw {
         pub(crate) next: Option<GpuWeakPointer<LinkedListHead>>,
     }
 
-    #[derive(Debug, Clone, Copy, Default)]
+    #[derive(Debug, Clone, Copy)]
     #[repr(C)]
     pub(crate) struct NotifierList {
         pub(crate) list_head: LinkedListHead,
         pub(crate) unkptr_10: U64,
     }
+    default_zeroed!(NotifierList);
 
     #[versions(AGX)]
     #[derive(Debug, Clone, Copy)]
@@ -60,8 +61,9 @@ pub(crate) mod raw {
         }
     }
 
-    #[derive(Debug, Default)]
+    #[derive(Debug)]
     pub(crate) struct Threshold(AtomicU64);
+    default_zeroed!(Threshold);
 
     impl Threshold {
         pub(crate) fn increment(&self) {

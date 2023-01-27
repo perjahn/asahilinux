@@ -7,7 +7,7 @@
 use super::event;
 use super::types::*;
 use crate::event::EventValue;
-use crate::trivial_gpustruct;
+use crate::{default_zeroed, trivial_gpustruct};
 
 #[derive(Debug)]
 #[repr(u32)]
@@ -71,7 +71,7 @@ pub(crate) mod raw {
         }
     }
 
-    #[derive(Debug, Default)]
+    #[derive(Debug)]
     #[repr(C)]
     pub(crate) struct RingState {
         pub(crate) gpu_doneptr: AtomicU32,
@@ -92,6 +92,7 @@ pub(crate) mod raw {
         pub(crate) cpu_freeptr: AtomicU32,
         __pad6: Pad<0xc>,
     }
+    default_zeroed!(RingState);
 
     #[derive(Debug, Clone, Copy)]
     #[repr(C)]

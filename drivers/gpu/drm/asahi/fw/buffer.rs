@@ -6,13 +6,13 @@
 
 use super::types::*;
 use super::workqueue;
-use crate::{no_debug, trivial_gpustruct};
+use crate::{default_zeroed, no_debug, trivial_gpustruct};
 use kernel::sync::Arc;
 
 pub(crate) mod raw {
     use super::*;
 
-    #[derive(Debug, Default)]
+    #[derive(Debug)]
     #[repr(C)]
     pub(crate) struct BlockControl {
         pub(crate) total: AtomicU32,
@@ -20,13 +20,15 @@ pub(crate) mod raw {
         pub(crate) unk: AtomicU32,
         pub(crate) pad: Pad<0x34>,
     }
+    default_zeroed!(BlockControl);
 
-    #[derive(Debug, Default)]
+    #[derive(Debug)]
     #[repr(C)]
     pub(crate) struct Counter {
         pub(crate) count: AtomicU32,
         __pad: Pad<0x3c>,
     }
+    default_zeroed!(Counter);
 
     #[derive(Debug, Default)]
     #[repr(C)]

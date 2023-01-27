@@ -5,7 +5,7 @@
 
 use super::channels;
 use super::types::*;
-use crate::{no_debug, trivial_gpustruct};
+use crate::{default_zeroed, no_debug, trivial_gpustruct};
 
 pub(crate) mod raw {
     use super::*;
@@ -773,7 +773,7 @@ pub(crate) mod raw {
     }
 
     #[versions(AGX)]
-    #[derive(Debug, Default)]
+    #[derive(Debug)]
     #[repr(C)]
     pub(crate) struct GpuGlobalStatsVtx {
         pub(crate) total_cmds: u32,
@@ -781,6 +781,8 @@ pub(crate) mod raw {
         #[ver(V >= V13_0B4)]
         pub(crate) unk_pad: Array<0x5c4, u8>,
     }
+    #[versions(AGX)]
+    default_zeroed!(GpuGlobalStatsVtx::ver);
 
     #[versions(AGX)]
     #[derive(Debug, Default)]
@@ -793,11 +795,12 @@ pub(crate) mod raw {
         pub(crate) unk_pad: Array<0x580, u8>,
     }
 
-    #[derive(Debug, Default)]
+    #[derive(Debug)]
     #[repr(C)]
     pub(crate) struct GpuStatsComp {
         pub(crate) unk: Array<0x140, u8>,
     }
+    default_zeroed!(GpuStatsComp);
 
     #[derive(Debug, Default)]
     #[repr(C)]

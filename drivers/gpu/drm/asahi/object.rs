@@ -22,6 +22,7 @@ use core::{mem, ptr, slice};
 
 use crate::alloc::Allocation;
 use crate::debug::*;
+use crate::fw::types::Zeroed;
 
 const DEBUG_CLASS: DebugFlags = DebugFlags::Object;
 
@@ -311,7 +312,7 @@ where
 
 impl<T: GpuStruct + Default, U: Allocation<T>> GpuObject<T, U>
 where
-    for<'a> <T as GpuStruct>::Raw<'a>: Default,
+    for<'a> <T as GpuStruct>::Raw<'a>: Default + Zeroed,
 {
     pub(crate) fn new_default(alloc: U) -> Result<Self> {
         GpuObject::<T, U>::new_inplace(alloc, Default::default(), |_inner, raw| {
