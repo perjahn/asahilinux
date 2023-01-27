@@ -1,12 +1,64 @@
-// SPDX-License-Identifier: GPL-2.0-only OR MIT
-#![allow(missing_docs)]
-#![allow(unused_imports)]
-#![allow(dead_code)]
+// SPDX-License-Identifier: Apache-2.0 OR MIT
 
 //! "Placement new" macro
+//!
+//! This cursed abomination of a declarative macro is used to emulate a "placement new" feature,
+//! which allows initializing objects directly in a user-provided memory region without first
+//! going through the stack.
+//!
+//! This driver needs to manage several large GPU objects of a fixed layout. Linux kernel stacks are
+//! very small, so it is impossible to create these objects on the stack. While the compiler can
+//! sometimes optimize away the stack copy and directly instantiate in target memory, this is not
+//! guaranteed and not reliable. Therefore, we need some mechanism to ergonomically initialize
+//! complex structures directly in a pre-allocated piece of memory.
+//!
+//! This issue also affects some driver-internal structs which are large/complex enough to overflow
+//! the stack. While this can be solved by breaking them up into pieces and using `Box` more
+//! liberally, this has performance implications and still isn't very nice. This macro can also be
+//! used to solve this issue.
+//!
+//! # Further reading
+//! https://github.com/rust-lang/rust/issues/27779#issuecomment-378416911
+//! https://internals.rust-lang.org/t/removal-of-all-unstable-placement-features/7223
 
-// Based on https://crates.io/crates/place by DianaNites,
-// with contributions by Joshua Barretto.
+/// Initialize a `MaybeUninit` in-place, without constructing the value on the stack first.
+///
+/// This macro is analogous to `MaybeUninit::write()`. In other words,
+/// `place!(foo, bar)` is equivalent to `MaybeUninit::write(foo, bar)`, except that `bar` is not
+/// constructed first, but rather its fields (if it is a structure constructor) are copied one by
+/// one into the correct location in the `MaybeUninit`.
+///
+/// The macro supports most Rust initialization syntax including type paths, generic arguments,
+/// and nested structures. Nested structures are themselves initialized in-place field by field.
+/// `..Default::default()` is supported, but this macro converts it to `..Zeroed::zeroed()`, as it
+/// initializes those structs by zero-initializing the underlying memory. Usage of
+/// `..Default::default()` with a type not implementing `Zeroed` will result in a compile error.
+///
+/// Usage:
+/// ```
+/// let mut buf = MaybeUninit::uninit();
+/// let mut_ref = place!(&mut buf, MyStruct {
+///     b: true,
+///     s: String::from("works"),
+///     i: str::parse::<i32>("123").unwrap(),
+///     v: vec![String::from("works")],
+///     x: foo::MyOtherCoolStruct {
+///         a: false,
+///         b: String::from("Hello, world!"),
+///     },
+///     y: foo::MyOtherCoolStruct {
+///         a: false,
+///         b: String::from("Hello, world!"),
+///     },
+///     z: foo::MyCoolGenericStruct::<bool, String> {
+///         a: false,
+///         b: String::from("Hello, world!"),
+///     },
+/// };
+/// // `mut_ref` is now a mutable reference to the `buf`, which is now safely initialized.
+/// ```
+///
+/// Based on https://crates.io/crates/place by DianaNites, with contributions by Joshua Barretto.
 #[macro_export]
 macro_rules! place {
     // Top-level struct
@@ -142,13 +194,16 @@ macro_rules! place {
     }};
 }
 
+/// Helper macro to get the struct type part of a struct initialization expression.
 #[macro_export]
+#[doc(hidden)]
 macro_rules! get_type {
     ($t:ty { $($val:tt)* }) => {
         $t
     };
 }
 
+/// Like `Box::try_new(...)`, but with in-place initialization.
 #[macro_export]
 macro_rules! box_in_place {
     ($($val:tt)*) => {{
