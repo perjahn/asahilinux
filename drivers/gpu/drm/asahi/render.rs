@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0-only OR MIT
-#![allow(missing_docs)]
-#![allow(unused_imports)]
-#![allow(dead_code)]
 #![allow(clippy::unusual_byte_groupings)]
 
-//! Asahi Render Queue
+//! Render work queue.
+//!
+//! A render queue consists of two underlying WorkQueues, one for vertex and one for fragment work.
+//! This module is in charge of creating all of the firmware structures required to submit 3D
+//! rendering work to the GPU, based on the userspace command buffer.
 
 use crate::alloc::Allocator;
 use crate::debug::*;
@@ -12,12 +13,11 @@ use crate::driver::AsahiDevice;
 use crate::fw::types::*;
 use crate::gpu::GpuManager;
 use crate::util::*;
-use crate::{alloc, buffer, channel, driver, event, file, fw, gem, gpu, microseq, mmu, workqueue};
+use crate::{alloc, buffer, channel, event, file, fw, gpu, microseq, mmu, workqueue};
 use crate::{box_in_place, inner_ptr, inner_weak_ptr, place};
 use core::mem::MaybeUninit;
 use core::sync::atomic::Ordering;
 use kernel::bindings;
-use kernel::drm::gem::BaseObject;
 use kernel::io_buffer::IoBufferReader;
 use kernel::prelude::*;
 use kernel::sync::{smutex::Mutex, Arc};
@@ -25,8 +25,13 @@ use kernel::user_ptr::UserSlicePtr;
 
 const DEBUG_CLASS: DebugFlags = DebugFlags::Render;
 
+/// Tiling/Vertex control bit to disable using more than one GPU cluster. This results in decreased
+/// throughput but also less latency, which is probably desirable for light vertex loads where the
+/// overhead of clustering/merging would exceed the time it takes to just run the job on one
+/// cluster.
 const TILECTL_DISABLE_CLUSTERING: u32 = 1u32 << 0;
 
+/// A render-capable queue from the point of a GPU client.
 #[versions(AGX)]
 pub(crate) struct RenderQueue {
     dev: AsahiDevice,
@@ -36,7 +41,7 @@ pub(crate) struct RenderQueue {
     wq_frag: Arc<workqueue::WorkQueue::ver>,
     buffer: buffer::Buffer::ver,
     gpu_context: GpuObject<fw::workqueue::GpuContextData>,
-    notifier_list: GpuObject<fw::event::NotifierList>,
+    _notifier_list: GpuObject<fw::event::NotifierList>,
     notifier: Arc<GpuObject<fw::event::Notifier::ver>>,
     id: u64,
     #[ver(V >= V13_0B4)]
@@ -45,6 +50,7 @@ pub(crate) struct RenderQueue {
 
 #[versions(AGX)]
 impl RenderQueue::ver {
+    /// Create a new render queue.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         dev: &AsahiDevice,
@@ -99,6 +105,9 @@ impl RenderQueue::ver {
                 },
             )?)?;
 
+        // FIXME: keep gpu_context and notifier_list alive as long as work exists on this queue.
+        // Not worth fixing until the syncobj/batch submission refactor.
+
         let ret = Ok(RenderQueue::ver {
             dev: dev.clone(),
             vm,
@@ -123,7 +132,7 @@ impl RenderQueue::ver {
             )?,
             buffer,
             gpu_context,
-            notifier_list,
+            _notifier_list: notifier_list,
             notifier,
             id,
             #[ver(V >= V13_0B4)]
@@ -134,6 +143,7 @@ impl RenderQueue::ver {
         ret
     }
 
+    /// Get the appropriate tiling parameters for a given userspace command buffer.
     fn get_tiling_params(
         cmdbuf: &bindings::drm_asahi_cmd_render,
         num_clusters: u32,
@@ -256,6 +266,7 @@ impl RenderQueue::ver {
 
 #[versions(AGX)]
 impl file::Queue for RenderQueue::ver {
+    /// Submit work to a render queue.
     fn submit(&self, cmd: &bindings::drm_asahi_submit, id: u64) -> Result {
         if cmd.cmd_type != bindings::drm_asahi_cmd_type_DRM_ASAHI_CMD_RENDER {
             return Err(EINVAL);
