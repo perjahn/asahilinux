@@ -105,7 +105,7 @@ impl WorkQueueInner::ver {
 }
 
 #[versions(AGX)]
-pub(crate) struct WorkQueueBatch<'a> {
+pub(crate) struct BatchBuilder<'a> {
     queue: &'a WorkQueue::ver,
     inner: Guard<'a, Mutex<WorkQueueInner::ver>>,
     commands: usize,
@@ -216,7 +216,7 @@ impl WorkQueue::ver {
     pub(crate) fn begin_batch(
         this: &Arc<WorkQueue::ver>,
         vm_slot: u32,
-    ) -> Result<WorkQueueBatch::ver<'_>> {
+    ) -> Result<BatchBuilder::ver<'_>> {
         let mut inner = this.inner.lock();
 
         if inner.event.is_none() {
@@ -226,7 +226,7 @@ impl WorkQueue::ver {
             inner.event = Some((event, cur));
         }
 
-        Ok(WorkQueueBatch::ver {
+        Ok(BatchBuilder::ver {
             queue: this,
             wptr: inner.wptr,
             inner,
@@ -350,7 +350,7 @@ impl WorkQueue for WorkQueue::ver {
 }
 
 #[versions(AGX)]
-impl<'a> WorkQueueBatch::ver<'a> {
+impl<'a> BatchBuilder::ver<'a> {
     pub(crate) fn add<T: Command>(&mut self, command: Box<GpuObject<T>>) -> Result {
         let inner = &mut self.inner;
 
@@ -382,7 +382,7 @@ impl<'a> WorkQueueBatch::ver<'a> {
         let inner = &mut self.inner;
         inner.batches.try_reserve(1)?;
 
-        let event = inner.event.as_mut().expect("WorkQueueBatch lost its event");
+        let event = inner.event.as_mut().expect("BatchBuilder lost its event");
 
         if self.commands == 0 {
             return Err(EINVAL);
@@ -417,7 +417,7 @@ impl<'a> WorkQueueBatch::ver<'a> {
         }
 
         let inner = &mut self.inner;
-        let event = inner.event.as_ref().expect("WorkQueueBatch lost its event");
+        let event = inner.event.as_ref().expect("BatchBuilder lost its event");
         let msg = fw::channels::RunWorkQueueMsg::ver {
             pipe_type: inner.pipe_type,
             work_queue: Some(inner.info.weak_pointer()),
@@ -436,7 +436,7 @@ impl<'a> WorkQueueBatch::ver<'a> {
             .inner
             .event
             .as_ref()
-            .expect("WorkQueueBatch lost its event");
+            .expect("BatchBuilder lost its event");
         &(event.0)
     }
 
@@ -445,7 +445,7 @@ impl<'a> WorkQueueBatch::ver<'a> {
             .inner
             .event
             .as_ref()
-            .expect("WorkQueueBatch lost its event");
+            .expect("BatchBuilder lost its event");
         event.1
     }
 
@@ -459,10 +459,10 @@ impl<'a> WorkQueueBatch::ver<'a> {
 }
 
 #[versions(AGX)]
-impl<'a> Drop for WorkQueueBatch::ver<'a> {
+impl<'a> Drop for BatchBuilder::ver<'a> {
     fn drop(&mut self) {
         if self.commands != 0 {
-            pr_warn!("WorkQueueBatch: rolling back {} commands!", self.commands);
+            pr_warn!("BatchBuilder: rolling back {} commands!", self.commands);
 
             let inner = &mut self.inner;
             let new_len = inner.pending.len() - self.commands;

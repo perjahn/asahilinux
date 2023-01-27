@@ -641,7 +641,7 @@ impl GpuManager::ver {
         self.dyncfg.id.core_masks_packed.as_slice()
     }
 
-    pub(crate) fn submit_batch(&self, batch: workqueue::WorkQueueBatch::ver<'_>) -> Result {
+    pub(crate) fn submit_batch(&self, batch: workqueue::BatchBuilder::ver<'_>) -> Result {
         let pipe_type = batch.pipe_type();
         let pipes = match pipe_type {
             PipeType::Vertex => &self.pipes.vtx,
