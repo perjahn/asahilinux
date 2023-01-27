@@ -268,7 +268,7 @@ struct BufferInner {
     info: GpuObject<buffer::Info::ver>,
     ualloc: Arc<Mutex<alloc::DefaultAllocator>>,
     ualloc_priv: Arc<Mutex<alloc::DefaultAllocator>>,
-    blocks: Vec<GpuArray<u8>>,
+    blocks: Vec<GpuOnlyArray<u8>>,
     max_blocks: usize,
     max_blocks_nomemless: usize,
     mgr: BufferManager,
@@ -446,12 +446,12 @@ impl Buffer::ver {
         let add_blocks = min_blocks - cur_count;
         let new_count = min_blocks;
 
-        let mut new_blocks: Vec<GpuArray<u8>> = Vec::new();
+        let mut new_blocks: Vec<GpuOnlyArray<u8>> = Vec::new();
 
         // Allocate the new blocks first, so if it fails they will be dropped
         let mut ualloc = inner.ualloc.lock();
         for _i in 0..add_blocks {
-            new_blocks.try_push(ualloc.array_empty(BLOCK_SIZE)?)?;
+            new_blocks.try_push(ualloc.array_gpuonly(BLOCK_SIZE)?)?;
         }
         core::mem::drop(ualloc);
 
