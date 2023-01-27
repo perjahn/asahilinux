@@ -1,30 +1,260 @@
 // SPDX-License-Identifier: GPL-2.0-only OR MIT
-#![allow(missing_docs)]
-#![allow(unused_imports)]
-#![allow(dead_code)]
 
-//! Asahi ring buffer channels
+//! Tiled Vertex Buffer management
+//!
+//! This module manages the Tiled Vertex Buffer, also known as the Parameter Buffer (in imgtec
+//! parlance) or the tiler heap (on other architectures). This buffer holds transformed primitive
+//! data between the vertex/tiling stage and the fragment stage.
+//!
+//! On AGX, the buffer is a heap of 128K blocks split into 32K pages (which must be aligned to a
+//! multiple of 32K in VA space). The buffer can be shared between multiple render jobs, and each
+//! will allocate pages from it during vertex processing and return them during fragment processing.
+//!
+//! If the buffer runs out of free pages, the vertex pass stops and a partial fragment pass occurs,
+//! spilling the intermediate render target state to RAM (a partial render). This is all managed
+//! transparently by the firmware. Since partial renders are less efficient, the kernel must grow
+//! the heap in response to feedback from the firmware to avoid partial renders in the future.
+//! Currently, we only ever grow the heap, and never shrink it.
+//!
+//! AGX also supports memoryless render targets, which can be used for intermediate results within
+//! a render pass. To support partial renders, it seems the GPU/firmware has the ability to borrow
+//! pages from the TVB buffer as a temporary render target buffer. Since this happens during a
+//! partial render itself, if the buffer runs out of space, it requires synchronous growth in
+//! response to a firmware interrupt. This is not currently supported, but may be in the future,
+//! though it is unclear whether it is worth the effort.
+//!
+//! This module is also in charge of managing the temporary objects associated with a single render
+//! pass, which includes the top-level tile array, the tail pointer cache, preemption buffers, and
+//! other miscellaneous structures collectively managed as a "scene".
+//!
+//! To avoid runaway memory usage, there is a maximum size for buffers (at that point it's unlikely
+//! that partial renders will incur much overhead over the buffer data access itself). This is
+//! different depending on whether memoryless render targets are in use, and is currently hardcoded.
+//! to the most common value used by macOS.
 
 use crate::debug::*;
 use crate::fw::buffer;
 use crate::fw::types::*;
 use crate::util::*;
-use crate::{alloc, fw, gpu, mmu, slotalloc, workqueue};
+use crate::{alloc, fw, gpu, mmu, slotalloc};
 use crate::{box_in_place, place};
-use core::cmp;
 use core::sync::atomic::Ordering;
+use kernel::prelude::*;
 use kernel::sync::{smutex::Mutex, Arc};
-use kernel::{dbg, prelude::*};
 
 const DEBUG_CLASS: DebugFlags = DebugFlags::Buffer;
 
+/// There are 127 GPU/firmware-side buffer manager slots (yes, 127, not 128).
 const NUM_BUFFERS: u32 = 127;
 
-pub(crate) const PAGE_SHIFT: usize = 15; // Buffer pages are 32K (!)
+/// Page size bits for buffer pages (32K). VAs must be aligned to this size.
+pub(crate) const PAGE_SHIFT: usize = 15;
+/// Page size for buffer pages.
 pub(crate) const PAGE_SIZE: usize = 1 << PAGE_SHIFT;
+/// Number of pages in a buffer block, which should be contiguous in VA space.
 pub(crate) const PAGES_PER_BLOCK: usize = 4;
+/// Size of a buffer block.
 pub(crate) const BLOCK_SIZE: usize = PAGE_SIZE * PAGES_PER_BLOCK;
 
+/// Metadata about the tiling configuration for a scene. This is computed in the `render` module.
+/// based on dimensions, tile size, and other info.
+pub(crate) struct TileInfo {
+    /// Tile count in the X dimension. Tiles are always 32x32.
+    pub(crate) tiles_x: u32,
+    /// Tile count in the Y dimension. Tiles are always 32x32.
+    pub(crate) tiles_y: u32,
+    /// Total tile count.
+    pub(crate) tiles: u32,
+    /// Micro-tile width (16 or 32).
+    pub(crate) utile_width: u32,
+    /// Micro-tile height (16 or 32).
+    pub(crate) utile_height: u32,
+    // Macro-tiles in the X dimension. Always 4.
+    //pub(crate) mtiles_x: u32,
+    // Macro-tiles in the Y dimension. Always 4.
+    //pub(crate) mtiles_y: u32,
+    /// Tiles per macro-tile in the X dimension.
+    pub(crate) tiles_per_mtile_x: u32,
+    /// Tiles per macro-tile in the Y dimension.
+    pub(crate) tiles_per_mtile_y: u32,
+    // Total tiles per macro-tile.
+    //pub(crate) tiles_per_mtile: u32,
+    /// Micro-tiles per macro-tile in the X dimension.
+    pub(crate) utiles_per_mtile_x: u32,
+    /// Micro-tiles per macro-tile in the Y dimension.
+    pub(crate) utiles_per_mtile_y: u32,
+    // Total micro-tiles per macro-tile.
+    //pub(crate) utiles_per_mtile: u32,
+    /// Size of the top-level tilemap, in bytes (for all layers, one cluster).
+    pub(crate) tilemap_size: usize,
+    /// Size of the Tail Pointer Cache, in bytes (for all layers * clusters).
+    pub(crate) tpc_size: usize,
+    /// Number of blocks in the clustering meta buffer (for clustering).
+    pub(crate) meta1_blocks: u32,
+    /// Minimum number of TVB blocks for this render.
+    pub(crate) min_tvb_blocks: usize,
+    /// XXX: Allocation factor for cluster tilemaps and meta4. Always 2?
+    pub(crate) cluster_factor: usize,
+    /// Tiling parameter structure passed to firmware.
+    pub(crate) params: fw::vertex::raw::TilingParameters,
+}
+
+/// A single scene, representing a render pass and its required buffers.
+#[versions(AGX)]
+#[derive(Debug)]
+pub(crate) struct Scene {
+    object: GpuObject<buffer::Scene::ver>,
+    slot: u32,
+    rebind: bool,
+    preempt2_off: usize,
+    preempt3_off: usize,
+    // Note: these are dead code only on some version variants.
+    // It's easier to do this than to propagate the version conditionals everywhere.
+    #[allow(dead_code)]
+    meta2_off: usize,
+    #[allow(dead_code)]
+    meta3_off: usize,
+    #[allow(dead_code)]
+    meta4_off: usize,
+}
+
+#[versions(AGX)]
+impl Scene::ver {
+    /// Returns true if the buffer was bound to a fresh manager slot, and therefore needs an init
+    /// command before a render.
+    pub(crate) fn rebind(&self) -> bool {
+        self.rebind
+    }
+
+    /// Returns the buffer manager slot this scene's buffer was bound to.
+    pub(crate) fn slot(&self) -> u32 {
+        self.slot
+    }
+
+    /// Returns the GPU pointer to the [`buffer::Scene::ver`].
+    pub(crate) fn gpu_pointer(&self) -> GpuPointer<'_, buffer::Scene::ver> {
+        self.object.gpu_pointer()
+    }
+
+    /// Returns the GPU weak pointer to the [`buffer::Scene::ver`].
+    pub(crate) fn weak_pointer(&self) -> GpuWeakPointer<buffer::Scene::ver> {
+        self.object.weak_pointer()
+    }
+
+    /// Returns the GPU weak pointer to the kernel-side temp buffer.
+    /// (purpose unknown...)
+    pub(crate) fn kernel_buffer_pointer(&self) -> GpuWeakPointer<[u8]> {
+        self.object.buffer.inner.lock().kernel_buffer.weak_pointer()
+    }
+
+    /// Returns the GPU weak pointer to the `buffer::Info::ver` object associated with this Scene.
+    pub(crate) fn buffer_pointer(&self) -> GpuWeakPointer<buffer::Info::ver> {
+        self.object.buffer.inner.lock().info.weak_pointer()
+    }
+
+    /// Returns the GPU pointer to the TVB heap metadata buffer.
+    pub(crate) fn tvb_heapmeta_pointer(&self) -> GpuPointer<'_, &'_ [u8]> {
+        self.object.tvb_heapmeta.gpu_pointer()
+    }
+
+    /// Returns the GPU pointer to the top-level TVB tilemap buffer.
+    pub(crate) fn tvb_tilemap_pointer(&self) -> GpuPointer<'_, &'_ [u8]> {
+        self.object.tvb_tilemap.gpu_pointer()
+    }
+
+    /// Returns the GPU pointer to the Tail Pointer Cache buffer.
+    pub(crate) fn tpc_pointer(&self) -> GpuPointer<'_, &'_ [u8]> {
+        self.object.tpc.gpu_pointer()
+    }
+
+    /// Returns the GPU pointer to the first preemption scratch buffer.
+    pub(crate) fn preempt_buf_1_pointer(&self) -> GpuPointer<'_, &'_ [u8]> {
+        self.object.preempt_buf.gpu_pointer()
+    }
+
+    /// Returns the GPU pointer to the second preemption scratch buffer.
+    pub(crate) fn preempt_buf_2_pointer(&self) -> GpuPointer<'_, &'_ [u8]> {
+        self.object
+            .preempt_buf
+            .gpu_offset_pointer(self.preempt2_off)
+    }
+
+    /// Returns the GPU pointer to the third preemption scratch buffer.
+    pub(crate) fn preempt_buf_3_pointer(&self) -> GpuPointer<'_, &'_ [u8]> {
+        self.object
+            .preempt_buf
+            .gpu_offset_pointer(self.preempt3_off)
+    }
+
+    /// Returns the GPU pointer to the per-cluster tilemap buffer, if clustering is enabled.
+    #[allow(dead_code)]
+    pub(crate) fn cluster_tilemaps_pointer(&self) -> Option<GpuPointer<'_, &'_ [u8]>> {
+        self.object
+            .clustering
+            .as_ref()
+            .map(|c| c.tilemaps.gpu_pointer())
+    }
+
+    /// Returns the GPU pointer to the clustering metadata 1 buffer, if clustering is enabled.
+    #[allow(dead_code)]
+    pub(crate) fn meta_1_pointer(&self) -> Option<GpuPointer<'_, &'_ [u8]>> {
+        self.object
+            .clustering
+            .as_ref()
+            .map(|c| c.meta.gpu_pointer())
+    }
+
+    /// Returns the GPU pointer to the clustering metadata 2 buffer, if clustering is enabled.
+    #[allow(dead_code)]
+    pub(crate) fn meta_2_pointer(&self) -> Option<GpuPointer<'_, &'_ [u8]>> {
+        self.object
+            .clustering
+            .as_ref()
+            .map(|c| c.meta.gpu_offset_pointer(self.meta2_off))
+    }
+
+    /// Returns the GPU pointer to the clustering metadata 3 buffer, if clustering is enabled.
+    #[allow(dead_code)]
+    pub(crate) fn meta_3_pointer(&self) -> Option<GpuPointer<'_, &'_ [u8]>> {
+        self.object
+            .clustering
+            .as_ref()
+            .map(|c| c.meta.gpu_offset_pointer(self.meta3_off))
+    }
+
+    /// Returns the GPU pointer to the clustering metadata 4 buffer, if clustering is enabled.
+    #[allow(dead_code)]
+    pub(crate) fn meta_4_pointer(&self) -> Option<GpuPointer<'_, &'_ [u8]>> {
+        self.object
+            .clustering
+            .as_ref()
+            .map(|c| c.meta.gpu_offset_pointer(self.meta4_off))
+    }
+
+    /// Returns the GPU pointer to an unknown buffer with incrementing numbers.
+    pub(crate) fn seq_buf_pointer(&self) -> GpuPointer<'_, &'_ [u64]> {
+        self.object.seq_buf.gpu_pointer()
+    }
+}
+
+#[versions(AGX)]
+impl Drop for Scene::ver {
+    fn drop(&mut self) {
+        let mut inner = self.object.buffer.inner.lock();
+        assert_ne!(inner.active_scenes, 0);
+        inner.active_scenes -= 1;
+
+        if inner.active_scenes == 0 {
+            mod_pr_debug!(
+                "Buffer: no scenes left, dropping slot {}",
+                inner.active_slot.take().unwrap().slot()
+            );
+            inner.active_slot = None;
+        }
+    }
+}
+
+/// Inner data for a single TVB buffer object.
 #[versions(AGX)]
 struct BufferInner {
     info: GpuObject<buffer::Info::ver>,
@@ -35,7 +265,7 @@ struct BufferInner {
     max_blocks_nomemless: usize,
     mgr: BufferManager,
     active_scenes: usize,
-    active_slot: Option<slotalloc::Guard<SlotInner>>,
+    active_slot: Option<slotalloc::Guard<()>>,
     last_token: Option<slotalloc::SlotToken>,
     tpc: Option<Arc<GpuArray<u8>>>,
     kernel_buffer: GpuArray<u8>,
@@ -46,155 +276,15 @@ struct BufferInner {
     num_clusters: usize,
 }
 
+/// Locked and reference counted TVB buffer.
 #[versions(AGX)]
 pub(crate) struct Buffer {
     inner: Arc<Mutex<BufferInner::ver>>,
 }
 
 #[versions(AGX)]
-#[derive(Debug)]
-pub(crate) struct Scene {
-    object: GpuObject<buffer::Scene::ver>,
-    slot: u32,
-    rebind: bool,
-    preempt2_off: usize,
-    preempt3_off: usize,
-    meta2_off: usize,
-    meta3_off: usize,
-    meta4_off: usize,
-}
-
-pub(crate) struct TileInfo {
-    pub(crate) tiles_x: u32,
-    pub(crate) tiles_y: u32,
-    pub(crate) tiles: u32,
-    pub(crate) utile_width: u32,
-    pub(crate) utile_height: u32,
-    pub(crate) mtiles_x: u32,
-    pub(crate) mtiles_y: u32,
-    pub(crate) tiles_per_mtile_x: u32,
-    pub(crate) tiles_per_mtile_y: u32,
-    pub(crate) tiles_per_mtile: u32,
-    pub(crate) utiles_per_mtile_x: u32,
-    pub(crate) utiles_per_mtile_y: u32,
-    pub(crate) utiles_per_mtile: u32,
-    pub(crate) tilemap_size: usize,
-    pub(crate) tpc_size: usize,
-    pub(crate) meta1_blocks: u32,
-    pub(crate) min_tvb_blocks: usize,
-    pub(crate) cluster_factor: usize,
-    pub(crate) params: fw::vertex::raw::TilingParameters,
-}
-
-#[versions(AGX)]
-impl Scene::ver {
-    pub(crate) fn rebind(&self) -> bool {
-        self.rebind
-    }
-
-    pub(crate) fn slot(&self) -> u32 {
-        self.slot
-    }
-
-    pub(crate) fn gpu_pointer(&self) -> GpuPointer<'_, buffer::Scene::ver> {
-        self.object.gpu_pointer()
-    }
-
-    pub(crate) fn weak_pointer(&self) -> GpuWeakPointer<buffer::Scene::ver> {
-        self.object.weak_pointer()
-    }
-
-    pub(crate) fn kernel_buffer_pointer(&self) -> GpuWeakPointer<[u8]> {
-        self.object.buffer.inner.lock().kernel_buffer.weak_pointer()
-    }
-
-    pub(crate) fn buffer_pointer(&self) -> GpuWeakPointer<buffer::Info::ver> {
-        self.object.buffer.inner.lock().info.weak_pointer()
-    }
-
-    pub(crate) fn tvb_heapmeta_pointer(&self) -> GpuPointer<'_, &'_ [u8]> {
-        self.object.tvb_heapmeta.gpu_pointer()
-    }
-
-    pub(crate) fn tvb_tilemap_pointer(&self) -> GpuPointer<'_, &'_ [u8]> {
-        self.object.tvb_tilemap.gpu_pointer()
-    }
-
-    pub(crate) fn tpc_pointer(&self) -> GpuPointer<'_, &'_ [u8]> {
-        self.object.tpc.gpu_pointer()
-    }
-
-    pub(crate) fn preempt_buf_1_pointer(&self) -> GpuPointer<'_, &'_ [u8]> {
-        self.object.preempt_buf.gpu_pointer()
-    }
-
-    pub(crate) fn preempt_buf_2_pointer(&self) -> GpuPointer<'_, &'_ [u8]> {
-        self.object
-            .preempt_buf
-            .gpu_offset_pointer(self.preempt2_off)
-    }
-
-    pub(crate) fn preempt_buf_3_pointer(&self) -> GpuPointer<'_, &'_ [u8]> {
-        self.object
-            .preempt_buf
-            .gpu_offset_pointer(self.preempt3_off)
-    }
-
-    pub(crate) fn cluster_tilemaps_pointer(&self) -> Option<GpuPointer<'_, &'_ [u8]>> {
-        self.object
-            .clustering
-            .as_ref()
-            .map(|c| c.tilemaps.gpu_pointer())
-    }
-
-    pub(crate) fn meta_1_pointer(&self) -> Option<GpuPointer<'_, &'_ [u8]>> {
-        self.object
-            .clustering
-            .as_ref()
-            .map(|c| c.meta.gpu_pointer())
-    }
-
-    pub(crate) fn meta_2_pointer(&self) -> Option<GpuPointer<'_, &'_ [u8]>> {
-        self.object
-            .clustering
-            .as_ref()
-            .map(|c| c.meta.gpu_offset_pointer(self.meta2_off))
-    }
-
-    pub(crate) fn meta_3_pointer(&self) -> Option<GpuPointer<'_, &'_ [u8]>> {
-        self.object
-            .clustering
-            .as_ref()
-            .map(|c| c.meta.gpu_offset_pointer(self.meta3_off))
-    }
-
-    pub(crate) fn meta_4_pointer(&self) -> Option<GpuPointer<'_, &'_ [u8]>> {
-        self.object
-            .clustering
-            .as_ref()
-            .map(|c| c.meta.gpu_offset_pointer(self.meta4_off))
-    }
-
-    pub(crate) fn seq_buf_pointer(&self) -> GpuPointer<'_, &'_ [u64]> {
-        self.object.seq_buf.gpu_pointer()
-    }
-
-    pub(crate) fn debug(&self) {
-        dbg!(self);
-        dbg!(&self.object.user_buffer);
-    }
-}
-
-pub(crate) struct SlotInner();
-
-impl slotalloc::SlotItem for SlotInner {
-    type Data = ();
-}
-
-pub(crate) struct BufferManager(slotalloc::SlotAllocator<SlotInner>);
-
-#[versions(AGX)]
 impl Buffer::ver {
+    /// Create a new Buffer for a given VM, given the per-VM allocators.
     pub(crate) fn new(
         gpu: &dyn gpu::GpuManager,
         alloc: &mut gpu::KernelAllocators,
@@ -204,7 +294,7 @@ impl Buffer::ver {
     ) -> Result<Buffer::ver> {
         // These are the typical max numbers on macOS.
         // 8GB machines have this halved.
-        let max_size: usize = 862322688;
+        let max_size: usize = 862_322_688; // bytes
         let max_size_nomemless = max_size / 3;
 
         let max_blocks = max_size / BLOCK_SIZE;
@@ -303,10 +393,12 @@ impl Buffer::ver {
         })
     }
 
+    /// Returns the total block count allocated to this Buffer.
     pub(crate) fn block_count(&self) -> u32 {
         self.inner.lock().blocks.len() as u32
     }
 
+    /// Automatically grow the Buffer based on feedback from the statistics.
     pub(crate) fn auto_grow(&self) -> Result<bool> {
         let inner = self.inner.lock();
 
@@ -331,6 +423,7 @@ impl Buffer::ver {
         }
     }
 
+    /// Ensure that the buffer has at least a certain minimum size in blocks.
     pub(crate) fn ensure_blocks(&self, min_blocks: usize) -> Result<bool> {
         let mut inner = self.inner.lock();
 
@@ -385,6 +478,7 @@ impl Buffer::ver {
         Ok(true)
     }
 
+    /// Create a new [`Scene::ver`] (render pass) using this buffer.
     pub(crate) fn new_scene(
         &self,
         alloc: &mut gpu::KernelAllocators,
@@ -527,10 +621,8 @@ impl Buffer::ver {
         })
     }
 
-    pub(crate) fn info_pointer(&self) -> GpuWeakPointer<buffer::Info::ver> {
-        self.inner.lock().info.weak_pointer()
-    }
-
+    /// Increment the buffer manager usage count. Should we done once we know the Scene is ready
+    /// to be committed and used in commands submitted to the GPU.
     pub(crate) fn increment(&self) {
         let inner = self.inner.lock();
         inner.info.counter.with(|raw, _inner| {
@@ -552,29 +644,15 @@ impl Clone for Buffer::ver {
     }
 }
 
-#[versions(AGX)]
-impl Drop for Scene::ver {
-    fn drop(&mut self) {
-        let mut inner = self.object.buffer.inner.lock();
-        assert_ne!(inner.active_scenes, 0);
-        inner.active_scenes -= 1;
-
-        if inner.active_scenes == 0 {
-            mod_pr_debug!(
-                "Buffer: no scenes left, dropping slot {}",
-                inner.active_slot.take().unwrap().slot()
-            );
-            inner.active_slot = None;
-        }
-    }
-}
+/// The GPU-global buffer manager, used to allocate and release buffer slots from the pool.
+pub(crate) struct BufferManager(slotalloc::SlotAllocator<()>);
 
 impl BufferManager {
     pub(crate) fn new() -> Result<BufferManager> {
         Ok(BufferManager(slotalloc::SlotAllocator::new(
             NUM_BUFFERS,
             (),
-            |_inner, _slot| SlotInner(),
+            |_inner, _slot| (),
         )?))
     }
 }
