@@ -129,6 +129,10 @@ macro_rules! inner_ptr {
 #[repr(C, packed(1))]
 pub(crate) struct GpuWeakPointer<T: ?Sized>(NonZeroU64, PhantomData<*const T>);
 
+/// SAFETY: GPU weak pointers are always safe to share between threads.
+unsafe impl<T: ?Sized> Send for GpuWeakPointer<T> {}
+unsafe impl<T: ?Sized> Sync for GpuWeakPointer<T> {}
+
 // Weak pointers can be copied/cloned regardless of their target type.
 impl<T: ?Sized> Copy for GpuWeakPointer<T> {}
 
@@ -454,6 +458,8 @@ impl<T: GpuStruct, U: Allocation<T>> Drop for GpuObject<T, U> {
 
 // SAFETY: GpuObjects are Send as long as the GpuStruct itself is Send
 unsafe impl<T: GpuStruct + Send, U: Allocation<T>> Send for GpuObject<T, U> {}
+// SAFETY: GpuObjects are Send as long as the GpuStruct itself is Send
+unsafe impl<T: GpuStruct + Sync, U: Allocation<T>> Sync for GpuObject<T, U> {}
 
 /// Trait used to erase the type of a GpuObject, used when we need to keep a list of heterogenous
 /// objects around.
@@ -673,6 +679,8 @@ impl<T, U: Allocation<T>> IndexMut<usize> for GpuArray<T, U> {
 
 // SAFETY: GpuArray are Send as long as the contained type itself is Send
 unsafe impl<T: Send, U: Allocation<T>> Send for GpuArray<T, U> {}
+// SAFETY: GpuArray are Sync as long as the contained type itself is Sync
+unsafe impl<T: Sync, U: Allocation<T>> Sync for GpuArray<T, U> {}
 
 impl<T: fmt::Debug, U: Allocation<T>> fmt::Debug for GpuArray<T, U> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
