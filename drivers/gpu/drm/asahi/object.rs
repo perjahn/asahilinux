@@ -1,23 +1,57 @@
 // SPDX-License-Identifier: GPL-2.0-only OR MIT
-#![allow(missing_docs)]
-#![allow(unused_imports)]
-#![allow(dead_code)]
 
 //! Asahi GPU object model
+//!
+//! The AGX GPU includes a coprocessor that uses a large number of shared memory structures to
+//! communicate with the driver. These structures contain GPU VA pointers to each other, which are
+//! directly dereferenced by the firmware and are expected to always be valid for the usage
+//! lifetime of the containing struct (which is an implicit contract, not explicitly managed).
+//! Any faults cause an unrecoverable firmware crash, requiring a full system reboot.
+//!
+//! In order to manage this complexity safely, we implement a GPU object model using Rust's type
+//! system to enforce GPU object lifetime relationships. GPU objects represent an allocated piece
+//! of memory of a given type, mapped to the GPU (and usually also the CPU). On the CPU side,
+//! these objects are associated with a pure Rust structure that contains the objects it depends
+//! on (or references to them). This allows us to map Rust lifetimes into the GPU object model
+//! system. Then, GPU VA pointers also inherit those lifetimes, which means the Rust borrow checker
+//! can ensure that all pointers are assigned an address that is guaranteed to outlive the GPU
+//! object it points to.
+//!
+//! Since the firmware object model does have self-referencing pointers (and there is of course no
+//! underlying revocability mechanism to make it safe), we must have an escape hatch. GPU pointers
+//! can be weak pointers, which do not enforce lifetimes. In those cases, it is the user's
+//! responsibility to ensure that lifetime requirements are met.
+//!
+//! In other words, the model is necessarily leaky and there is no way to fully map Rust safety to
+//! GPU firmware object safety. The goal of the model is to make it easy to model the lifetimes of
+//! GPU objects and have the compiler help in avoiding mistakes, rather than to guarantee safety
+//! 100% of the time as would be the case for CPU-side Rust code.
 
-use kernel::macros::versions;
+// TODO: There is a fundamental soundness issue with sharing memory with the GPU (that even affects
+// C code too). Since the GPU is free to mutate that memory at any time, normal reference invariants
+// cannot be enforced on the CPU side. For example, the compiler could perform an optimization that
+// assumes that a given memory location does not change between two reads, and causes UB otherwise,
+// and then the GPU could mutate that memory out from under the CPU.
+//
+// For cases where we *expect* this to happen, we use atomic types, which avoid this issue. However,
+// doing so for every single field of every type is a non-starter. Right now, there seems to be no
+// good solution for this that does not come with significant performance or ergonomics downsides.
+//
+// In *practice* we are almost always only writing GPU memory, and only reading from atomics, so the
+// chances of this actually triggering UB (e.g. a security issue that can be triggered from the GPU
+// side) due to a compiler optimization are very slim.
+//
+// Further discussion: https://github.com/rust-lang/unsafe-code-guidelines/issues/152
 
 use kernel::{error::code::*, prelude::*};
 
 use alloc::{boxed::Box, fmt};
 use core::fmt::Debug;
-use core::fmt::Error;
 use core::fmt::Formatter;
 use core::marker::PhantomData;
 use core::mem::MaybeUninit;
 use core::num::NonZeroU64;
 use core::ops::{Deref, DerefMut, Index, IndexMut};
-use core::sync::atomic::{AtomicU32, Ordering};
 use core::{mem, ptr, slice};
 
 use crate::alloc::Allocation;
@@ -26,15 +60,29 @@ use crate::fw::types::Zeroed;
 
 const DEBUG_CLASS: DebugFlags = DebugFlags::Object;
 
+/// A GPU-side strong pointer, which is a 64-bit non-zero VA with an associated lifetime.
+///
+/// In rare cases these pointers are not aligned, so this is `packed(1)`.
 #[repr(C, packed(1))]
 pub(crate) struct GpuPointer<'a, T: ?Sized>(NonZeroU64, PhantomData<&'a T>);
 
 impl<'a, T: ?Sized> GpuPointer<'a, T> {
+    /// Logical OR the pointer with an arbitrary `u64`. This is used when GPU struct fields contain
+    /// misc flag fields in the upper bits. The lifetime is retained. This is GPU-unsafe in
+    /// principle, but we assert that only non-implemented address bits are touched, which is safe
+    /// for pointers used by the GPU (not by firmware).
     pub(crate) fn or(&self, other: u64) -> GpuPointer<'a, T> {
+        // This will fail for kernel-half pointers, which should not be ORed.
+        assert_eq!(self.0.get() & other, 0);
+        // Assert that we only touch the high bits.
+        assert_eq!(other & 0xffffffffff, 0);
         GpuPointer(self.0 | other, PhantomData)
     }
 
-    // The third argument is a type inference hack
+    /// Add an arbitrary offset to the pointer. This is not safe (from the GPU perspective), and
+    /// should only be used via the `inner_ptr` macro to get pointers to inner fields, hence we mark
+    /// it `unsafe` to discourage direct use.
+    // NOTE: The third argument is a type inference hack.
     pub(crate) unsafe fn offset<U>(&self, off: usize, _: *const U) -> GpuPointer<'a, U> {
         GpuPointer::<'a, U>(
             NonZeroU64::new(self.0.get() + (off as u64)).unwrap(),
@@ -50,9 +98,38 @@ impl<'a, T: ?Sized> fmt::Debug for GpuPointer<'a, T> {
     }
 }
 
+/// Take a pointer to a sub-field within a structure pointed to by a GpuPointer, keeping the
+/// lifetime.
+#[macro_export]
+macro_rules! inner_ptr {
+    ($gpuva:expr, $($f:tt)*) => ({
+        // This mirrors kernel::offset_of(), except we use type inference to avoid having to know
+        // the type of the pointer explicitly.
+        fn uninit_from<'a, T: GpuStruct>(_: GpuPointer<'a, T>) -> core::mem::MaybeUninit<T::Raw<'static>> {
+            core::mem::MaybeUninit::uninit()
+        }
+        let tmp = uninit_from($gpuva);
+        let outer = tmp.as_ptr();
+        // SAFETY: The pointer is valid and aligned, just not initialised; `addr_of` ensures that
+        // we don't actually read from `outer` (which would be UB) nor create an intermediate
+        // reference.
+        let p: *const _ = unsafe { core::ptr::addr_of!((*outer).$($f)*) };
+        let inner = p as *const u8;
+        // SAFETY: The two pointers are within the same allocation block.
+        let off = unsafe { inner.offset_from(outer as *const u8) };
+        // SAFETY: The resulting pointer is guaranteed to point to valid memory within the outer
+        // object.
+        unsafe { $gpuva.offset(off.try_into().unwrap(), p) }
+    })
+}
+
+/// A GPU-side weak pointer, which is a 64-bit non-zero VA with no lifetime.
+///
+/// In rare cases these pointers are not aligned, so this is `packed(1)`.
 #[repr(C, packed(1))]
 pub(crate) struct GpuWeakPointer<T: ?Sized>(NonZeroU64, PhantomData<*const T>);
 
+// Weak pointers can be copied/cloned regardless of their target type.
 impl<T: ?Sized> Copy for GpuWeakPointer<T> {}
 
 impl<T: ?Sized> Clone for GpuWeakPointer<T> {
@@ -62,11 +139,10 @@ impl<T: ?Sized> Clone for GpuWeakPointer<T> {
 }
 
 impl<T: ?Sized> GpuWeakPointer<T> {
-    pub(crate) fn or(&self, other: u64) -> GpuWeakPointer<T> {
-        GpuWeakPointer(self.0 | other, PhantomData)
-    }
-
-    // The third argument is a type inference hack
+    /// Add an arbitrary offset to the pointer. This is not safe (from the GPU perspective), and
+    /// should only be used via the `inner_ptr` macro to get pointers to inner fields, hence we mark
+    /// it `unsafe` to discourage direct use.
+    // NOTE: The third argument is a type inference hack.
     pub(crate) unsafe fn offset<U>(&self, off: usize, _: *const U) -> GpuWeakPointer<U> {
         GpuWeakPointer::<U>(
             NonZeroU64::new(self.0.get() + (off as u64)).unwrap(),
@@ -82,43 +158,46 @@ impl<T: ?Sized> fmt::Debug for GpuWeakPointer<T> {
     }
 }
 
-#[repr(transparent)]
-pub(crate) struct GpuRawPointer(NonZeroU64);
-
-#[macro_export]
-macro_rules! inner_ptr {
-    ($gpuva:expr, $($f:tt)*) => ({
-        fn uninit_from<'a, T: GpuStruct>(_: GpuPointer<'a, T>) -> core::mem::MaybeUninit<T::Raw<'static>> {
-            core::mem::MaybeUninit::uninit()
-        }
-        let tmp = uninit_from($gpuva);
-        let outer = tmp.as_ptr();
-        let p: *const _ = unsafe { core::ptr::addr_of!((*outer).$($f)*) };
-        let inner = p as *const u8;
-        let off = unsafe { inner.offset_from(outer as *const u8) };
-        unsafe { $gpuva.offset(off.try_into().unwrap(), p) }
-    })
-}
-
+/// Take a pointer to a sub-field within a structure pointed to by a GpuWeakPointer.
 #[macro_export]
 macro_rules! inner_weak_ptr {
     ($gpuva:expr, $($f:tt)*) => ({
+        // See inner_ptr()
         fn uninit_from<T: GpuStruct>(_: GpuWeakPointer<T>) -> core::mem::MaybeUninit<T::Raw<'static>> {
             core::mem::MaybeUninit::uninit()
         }
         let tmp = uninit_from($gpuva);
         let outer = tmp.as_ptr();
+        // SAFETY: The pointer is valid and aligned, just not initialised; `addr_of` ensures that
+        // we don't actually read from `outer` (which would be UB) nor create an intermediate
+        // reference.
         let p: *const _ = unsafe { core::ptr::addr_of!((*outer).$($f)*) };
         let inner = p as *const u8;
+        // SAFETY: The two pointers are within the same allocation block.
         let off = unsafe { inner.offset_from(outer as *const u8) };
+        // SAFETY: The resulting pointer is guaranteed to point to valid memory within the outer
+        // object.
         unsafe { $gpuva.offset(off.try_into().unwrap(), p) }
     })
 }
 
+/// Types that implement this trait represent a GPU structure from the CPU side.
+///
+/// The `Raw` type represents the actual raw structure definition on the GPU side.
+///
+/// Types implementing [`GpuStruct`] must have fields owning any objects (or strong references
+/// to them) that GPU pointers in the `Raw` structure point to. This mechanism is used to enforce
+/// lifetimes.
 pub(crate) trait GpuStruct: 'static {
-    type Raw<'a>: Sized;
+    /// The type of the GPU-side structure definition representing the firmware struct layout.
+    type Raw<'a>;
 }
 
+/// An instance of a GPU object in memory.
+///
+/// # Invariants
+/// `raw` must point to a valid mapping of the `T::Raw` type associated with the `alloc` allocation.
+/// `gpu_ptr` must be the GPU address of the same object.
 pub(crate) struct GpuObject<T: GpuStruct, U: Allocation<T>> {
     raw: *mut T::Raw<'static>,
     alloc: U,
@@ -127,6 +206,11 @@ pub(crate) struct GpuObject<T: GpuStruct, U: Allocation<T>> {
 }
 
 impl<T: GpuStruct, U: Allocation<T>> GpuObject<T, U> {
+    /// Create a new GpuObject given an allocator and the inner data (a type implementing
+    /// GpuStruct).
+    ///
+    /// The caller passes a closure that constructs the `T::Raw` type given a reference to the
+    /// `GpuStruct`. This is the mechanism used to enforce lifetimes.
     pub(crate) fn new(
         alloc: U,
         inner: T,
@@ -154,9 +238,9 @@ impl<T: GpuStruct, U: Allocation<T>> GpuObject<T, U> {
         );
         let p = alloc.ptr().ok_or(EINVAL)?.as_ptr() as *mut T::Raw<'static>;
         let mut raw = callback(&inner);
-        unsafe {
-            p.copy_from(&mut raw as *mut _ as *mut u8 as *mut _, 1);
-        }
+        // SAFETY: `p` is guaranteed to be valid per the Allocation invariant, and the type is
+        // identical to the type of `raw` other than the lifetime.
+        unsafe { p.copy_from(&mut raw as *mut _ as *mut u8 as *mut _, 1) };
         mem::forget(raw);
         Ok(Self {
             raw: p,
@@ -166,6 +250,12 @@ impl<T: GpuStruct, U: Allocation<T>> GpuObject<T, U> {
         })
     }
 
+    /// Create a new GpuObject given an allocator and the boxed inner data (a type implementing
+    /// GpuStruct).
+    ///
+    /// The caller passes a closure that initializes the `T::Raw` type given a reference to the
+    /// `GpuStruct` and a `MaybeUninit<T::Raw>`. This is intended to be used with the place!()
+    /// macro to avoid constructing the whole `T::Raw` object on the stack.
     pub(crate) fn new_boxed(
         alloc: U,
         inner: Box<T>,
@@ -200,6 +290,12 @@ impl<T: GpuStruct, U: Allocation<T>> GpuObject<T, U> {
         })
     }
 
+    /// Create a new GpuObject given an allocator and the inner data (a type implementing
+    /// GpuStruct).
+    ///
+    /// The caller passes a closure that initializes the `T::Raw` type given a reference to the
+    /// `GpuStruct` and a `MaybeUninit<T::Raw>`. This is intended to be used with the place!()
+    /// macro to avoid constructing the whole `T::Raw` object on the stack.
     pub(crate) fn new_inplace(
         alloc: U,
         inner: T,
@@ -208,6 +304,12 @@ impl<T: GpuStruct, U: Allocation<T>> GpuObject<T, U> {
         GpuObject::<T, U>::new_boxed(alloc, Box::try_new(inner)?, callback)
     }
 
+    /// Create a new GpuObject given an allocator, with callback-based initialization.
+    ///
+    /// This is used when the construction of the `T` type requires knowing the GPU VA address of
+    /// the structure that is being constructed ahead of time. The first callback constructs a
+    /// `Box<T>` given the pointer to the about-to-be-initialized GPU structure, and the second
+    /// callback initializes that structure as in `new_boxed`.
     pub(crate) fn new_prealloc(
         alloc: U,
         inner_cb: impl FnOnce(GpuWeakPointer<T>) -> Result<Box<T>>,
@@ -243,45 +345,45 @@ impl<T: GpuStruct, U: Allocation<T>> GpuObject<T, U> {
         })
     }
 
+    /// Returns the GPU VA of this object (as a raw [`NonZeroU64`])
     pub(crate) fn gpu_va(&self) -> NonZeroU64 {
         self.gpu_ptr.0
     }
 
+    /// Returns a strong GPU pointer to this object, with a lifetime.
     pub(crate) fn gpu_pointer(&self) -> GpuPointer<'_, T> {
         GpuPointer(self.gpu_ptr.0, PhantomData)
     }
 
+    /// Returns a weak GPU pointer to this object, with no lifetime.
     pub(crate) fn weak_pointer(&self) -> GpuWeakPointer<T> {
         GpuWeakPointer(self.gpu_ptr.0, PhantomData)
     }
 
-    /* FIXME: unsound
-    pub(crate) fn raw_ref(&self) -> &<T as GpuStruct>::Raw<'_> {
-        unsafe { &*(self.raw as *mut u8 as *mut <T as GpuStruct>::Raw<'_>) }
-    }
-
-    pub(crate) fn raw_mut(&mut self) -> &mut <T as GpuStruct>::Raw<'_> {
-        unsafe { &mut *(self.raw as *mut u8 as *mut <T as GpuStruct>::Raw<'_>) }
-    }
-    */
-
+    /// Perform a mutation to the inner `Raw` data given a user-supplied callback.
+    ///
+    /// The callback gets a mutable reference to the `GpuStruct` type.
     pub(crate) fn with_mut<RetVal>(
         &mut self,
         callback: impl for<'a> FnOnce(&'a mut <T as GpuStruct>::Raw<'a>, &'a mut T) -> RetVal,
     ) -> RetVal {
+        // SAFETY: `self.raw` is valid per the type invariant, and the second half is just
+        // converting lifetimes.
         unsafe { callback(&mut *self.raw, &mut *(&mut *self.inner as *mut _)) }
     }
 
+    /// Access the inner `Raw` data given a user-supplied callback.
+    ///
+    /// The callback gets a reference to the `GpuStruct` type.
     pub(crate) fn with<RetVal>(
         &self,
         callback: impl for<'a> FnOnce(&'a <T as GpuStruct>::Raw<'a>, &'a T) -> RetVal,
     ) -> RetVal {
+        // SAFETY: `self.raw` is valid per the type invariant, and the second half is just
+        // converting lifetimes.
         unsafe { callback(&*self.raw, &*(&*self.inner as *const _)) }
     }
 }
-
-pub(crate) trait OpaqueGpuObject {}
-impl<T: GpuStruct, U: Allocation<T>> OpaqueGpuObject for GpuObject<T, U> {}
 
 impl<T: GpuStruct, U: Allocation<T>> Deref for GpuObject<T, U> {
     type Target = T;
@@ -303,6 +405,7 @@ where
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct(core::any::type_name::<T>())
+            // SAFETY: `self.raw` is valid per the type invariant.
             .field("raw", &format_args!("{:#X?}", unsafe { &*self.raw }))
             .field("inner", &format_args!("{:#X?}", &self.inner))
             .field("alloc", &format_args!("{:?}", &self.alloc))
@@ -314,8 +417,11 @@ impl<T: GpuStruct + Default, U: Allocation<T>> GpuObject<T, U>
 where
     for<'a> <T as GpuStruct>::Raw<'a>: Default + Zeroed,
 {
+    /// Create a new GpuObject with default data. `T` must implement `Default` and `T::Raw` must
+    /// implement `Zeroed`, since the GPU-side memory is initialized by zeroing.
     pub(crate) fn new_default(alloc: U) -> Result<Self> {
         GpuObject::<T, U>::new_inplace(alloc, Default::default(), |_inner, raw| {
+            // SAFETY: `raw` is valid here, and `T::Raw` implements `Zeroed`.
             Ok(unsafe {
                 ptr::write_bytes(raw, 0, 1);
                 (*raw).assume_init_mut()
@@ -324,19 +430,44 @@ where
     }
 }
 
-pub(crate) struct GpuOnlyArray<T: Sized, U: Allocation<T>> {
+impl<T: GpuStruct, U: Allocation<T>> Drop for GpuObject<T, U> {
+    fn drop(&mut self) {
+        mod_dev_dbg!(
+            self.alloc.device(),
+            "Dropping {} @ {:?}",
+            core::any::type_name::<T>(),
+            self.gpu_pointer()
+        );
+    }
+}
+
+// SAFETY: GpuObjects are Send as long as the GpuStruct itself is Send
+unsafe impl<T: GpuStruct + Send, U: Allocation<T>> Send for GpuObject<T, U> {}
+
+/// Trait used to erase the type of a GpuObject, used when we need to keep a list of heterogenous
+/// objects around.
+pub(crate) trait OpaqueGpuObject {}
+
+impl<T: GpuStruct, U: Allocation<T>> OpaqueGpuObject for GpuObject<T, U> {}
+
+/// An array of raw GPU objects that is only accessible to the GPU (no CPU-side mapping required).
+///
+/// This must necessarily be uninitialized as far as the GPU is concerned, so it cannot be used
+/// when initialization is required.
+///
+/// # Invariants
+///
+/// `alloc` is valid and at least as large as `len` times the size of one `T`.
+/// `gpu_ptr` is valid and points to the allocation start.
+pub(crate) struct GpuOnlyArray<T, U: Allocation<T>> {
     len: usize,
     alloc: U,
     gpu_ptr: NonZeroU64,
     _p: PhantomData<T>,
 }
 
-pub(crate) struct GpuArray<T: Sized, U: Allocation<T>> {
-    raw: *mut T,
-    array: GpuOnlyArray<T, U>,
-}
-
-impl<T: Sized, U: Allocation<T>> GpuOnlyArray<T, U> {
+impl<T, U: Allocation<T>> GpuOnlyArray<T, U> {
+    /// Allocate a new GPU-only array with the given length.
     pub(crate) fn new(alloc: U, count: usize) -> Result<GpuOnlyArray<T, U>> {
         let bytes = count * mem::size_of::<T>();
         let gpu_ptr = NonZeroU64::new(alloc.gpu_ptr()).ok_or(EINVAL)?;
@@ -350,53 +481,23 @@ impl<T: Sized, U: Allocation<T>> GpuOnlyArray<T, U> {
             _p: PhantomData,
         })
     }
-}
 
-impl<T: Sized + Copy, U: Allocation<T>> GpuArray<T, U> {
-    pub(crate) fn new(alloc: U, data: &[T]) -> Result<GpuArray<T, U>> {
-        let p = alloc.ptr().ok_or(EINVAL)?.as_ptr();
-        let inner = GpuOnlyArray::new(alloc, data.len())?;
-        unsafe {
-            ptr::copy(data.as_ptr(), p, data.len());
-        }
-        Ok(Self {
-            raw: p,
-            array: inner,
-        })
-    }
-}
-
-impl<T: Sized + Default, U: Allocation<T>> GpuArray<T, U> {
-    pub(crate) fn empty(alloc: U, count: usize) -> Result<GpuArray<T, U>> {
-        let p = alloc.ptr().ok_or(EINVAL)?.as_ptr() as *mut T;
-        let inner = GpuOnlyArray::new(alloc, count)?;
-        let mut pi = p;
-        for _i in 0..count {
-            unsafe {
-                pi.write(Default::default());
-            }
-            pi = unsafe { pi.add(1) };
-        }
-        Ok(Self {
-            raw: p,
-            array: inner,
-        })
-    }
-}
-
-impl<T: Sized, U: Allocation<T>> GpuOnlyArray<T, U> {
+    /// Returns the GPU VA of this arraw (as a raw [`NonZeroU64`])
     pub(crate) fn gpu_va(&self) -> NonZeroU64 {
         self.gpu_ptr
     }
 
+    /// Returns a strong GPU pointer to this array, with a lifetime.
     pub(crate) fn gpu_pointer(&self) -> GpuPointer<'_, &'_ [T]> {
         GpuPointer(self.gpu_ptr, PhantomData)
     }
 
+    /// Returns a weak GPU pointer to this array, with no lifetime.
     pub(crate) fn weak_pointer(&self) -> GpuWeakPointer<[T]> {
         GpuWeakPointer(self.gpu_ptr, PhantomData)
     }
 
+    /// Returns a pointer to an offset within the array (as a subslice).
     pub(crate) fn gpu_offset_pointer(&self, offset: usize) -> GpuPointer<'_, &'_ [T]> {
         if offset > self.len {
             panic!("Index {} out of bounds (len: {})", offset, self.len);
@@ -407,6 +508,8 @@ impl<T: Sized, U: Allocation<T>> GpuOnlyArray<T, U> {
         )
     }
 
+    /* Not used yet
+    /// Returns a weak pointer to an offset within the array (as a subslice).
     pub(crate) fn weak_offset_pointer(&self, offset: usize) -> GpuWeakPointer<[T]> {
         if offset > self.len {
             panic!("Index {} out of bounds (len: {})", offset, self.len);
@@ -417,6 +520,7 @@ impl<T: Sized, U: Allocation<T>> GpuOnlyArray<T, U> {
         )
     }
 
+    /// Returns a pointer to an element within the array.
     pub(crate) fn gpu_item_pointer(&self, index: usize) -> GpuPointer<'_, &'_ T> {
         if index >= self.len {
             panic!("Index {} out of bounds (len: {})", index, self.len);
@@ -426,7 +530,9 @@ impl<T: Sized, U: Allocation<T>> GpuOnlyArray<T, U> {
             PhantomData,
         )
     }
+    */
 
+    /// Returns a weak pointer to an element within the array.
     pub(crate) fn weak_item_pointer(&self, index: usize) -> GpuWeakPointer<T> {
         if index >= self.len {
             panic!("Index {} out of bounds (len: {})", index, self.len);
@@ -437,75 +543,13 @@ impl<T: Sized, U: Allocation<T>> GpuOnlyArray<T, U> {
         )
     }
 
+    /// Returns the length of the array.
     pub(crate) fn len(&self) -> usize {
         self.len
     }
 }
 
-impl<T: Sized, U: Allocation<T>> GpuArray<T, U> {
-    pub(crate) fn as_slice(&self) -> &[T] {
-        unsafe { slice::from_raw_parts(self.raw, self.len) }
-    }
-
-    pub(crate) fn as_mut_slice(&mut self) -> &mut [T] {
-        unsafe { slice::from_raw_parts_mut(self.raw, self.len) }
-    }
-}
-
-impl<T: Sized, U: Allocation<T>> Deref for GpuArray<T, U> {
-    type Target = GpuOnlyArray<T, U>;
-
-    fn deref(&self) -> &GpuOnlyArray<T, U> {
-        &self.array
-    }
-}
-
-impl<T: Sized, U: Allocation<T>> Index<usize> for GpuArray<T, U> {
-    type Output = T;
-
-    fn index(&self, index: usize) -> &T {
-        if index >= self.len {
-            panic!("Index {} out of bounds (len: {})", index, self.len);
-        }
-        unsafe { &*(self.raw.add(index)) }
-    }
-}
-
-impl<T: Sized, U: Allocation<T>> IndexMut<usize> for GpuArray<T, U> {
-    fn index_mut(&mut self, index: usize) -> &mut T {
-        if index >= self.len {
-            panic!("Index {} out of bounds (len: {})", index, self.len);
-        }
-        unsafe { &mut *(self.raw.add(index)) }
-    }
-}
-
-unsafe impl<T: GpuStruct + Send, U: Allocation<T>> Send for GpuObject<T, U> {}
-unsafe impl<T: Sized + Send, U: Allocation<T>> Send for GpuArray<T, U> {}
-
-impl<T: GpuStruct, U: Allocation<T>> Drop for GpuObject<T, U> {
-    fn drop(&mut self) {
-        mod_dev_dbg!(
-            self.alloc.device(),
-            "Dropping {} @ {:?}",
-            core::any::type_name::<T>(),
-            self.gpu_pointer()
-        );
-    }
-}
-
-impl<T: Sized, U: Allocation<T>> Drop for GpuOnlyArray<T, U> {
-    fn drop(&mut self) {
-        mod_dev_dbg!(
-            self.alloc.device(),
-            "Dropping {} @ {:?}",
-            core::any::type_name::<T>(),
-            self.gpu_pointer()
-        );
-    }
-}
-
-impl<T: Sized + fmt::Debug, U: Allocation<T>> fmt::Debug for GpuOnlyArray<T, U> {
+impl<T: fmt::Debug, U: Allocation<T>> fmt::Debug for GpuOnlyArray<T, U> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct(core::any::type_name::<T>())
             .field("len", &format_args!("{:#X?}", self.len()))
@@ -513,7 +557,113 @@ impl<T: Sized + fmt::Debug, U: Allocation<T>> fmt::Debug for GpuOnlyArray<T, U> 
     }
 }
 
-impl<T: Sized + fmt::Debug, U: Allocation<T>> fmt::Debug for GpuArray<T, U> {
+impl<T, U: Allocation<T>> Drop for GpuOnlyArray<T, U> {
+    fn drop(&mut self) {
+        mod_dev_dbg!(
+            self.alloc.device(),
+            "Dropping {} @ {:?}",
+            core::any::type_name::<T>(),
+            self.gpu_pointer()
+        );
+    }
+}
+
+/// An array of raw GPU objects that is also CPU-accessible.
+///
+/// # Invariants
+///
+/// `raw` is valid and points to the CPU-side view of the array (which must have one).
+pub(crate) struct GpuArray<T, U: Allocation<T>> {
+    raw: *mut T,
+    array: GpuOnlyArray<T, U>,
+}
+
+/* Not used yet
+impl<T: Copy, U: Allocation<T>> GpuArray<T, U> {
+    /// Allocate a new GPU array, copying the contents from a slice.
+    pub(crate) fn new(alloc: U, data: &[T]) -> Result<GpuArray<T, U>> {
+        let p = alloc.ptr().ok_or(EINVAL)?.as_ptr();
+        let inner = GpuOnlyArray::new(alloc, data.len())?;
+        // SAFETY: `p` is valid per the Allocation type invariant, and GpuOnlyArray guarantees
+        // that its size is at least as large as `data.len()`.
+        unsafe { ptr::copy(data.as_ptr(), p, data.len()) };
+        Ok(Self {
+            raw: p,
+            array: inner,
+        })
+    }
+}
+*/
+
+impl<T: Default, U: Allocation<T>> GpuArray<T, U> {
+    /// Allocate a new GPU array, initializing each element to its default.
+    pub(crate) fn empty(alloc: U, count: usize) -> Result<GpuArray<T, U>> {
+        let p = alloc.ptr().ok_or(EINVAL)?.as_ptr() as *mut T;
+        let inner = GpuOnlyArray::new(alloc, count)?;
+        let mut pi = p;
+        for _i in 0..count {
+            // SAFETY: `pi` is valid per the Allocation type invariant, and GpuOnlyArray guarantees
+            // that it can never iterate beyond the buffer length.
+            unsafe {
+                pi.write(Default::default());
+                pi = pi.add(1);
+            }
+        }
+        Ok(Self {
+            raw: p,
+            array: inner,
+        })
+    }
+}
+
+impl<T, U: Allocation<T>> GpuArray<T, U> {
+    /// Get a slice view of the array contents.
+    pub(crate) fn as_slice(&self) -> &[T] {
+        // SAFETY: self.raw / self.len are valid per the type invariant
+        unsafe { slice::from_raw_parts(self.raw, self.len) }
+    }
+
+    /// Get a mutable slice view of the array contents.
+    pub(crate) fn as_mut_slice(&mut self) -> &mut [T] {
+        // SAFETY: self.raw / self.len are valid per the type invariant
+        unsafe { slice::from_raw_parts_mut(self.raw, self.len) }
+    }
+}
+
+impl<T, U: Allocation<T>> Deref for GpuArray<T, U> {
+    type Target = GpuOnlyArray<T, U>;
+
+    fn deref(&self) -> &GpuOnlyArray<T, U> {
+        &self.array
+    }
+}
+
+impl<T, U: Allocation<T>> Index<usize> for GpuArray<T, U> {
+    type Output = T;
+
+    fn index(&self, index: usize) -> &T {
+        if index >= self.len {
+            panic!("Index {} out of bounds (len: {})", index, self.len);
+        }
+        // SAFETY: This is bounds checked above
+        unsafe { &*(self.raw.add(index)) }
+    }
+}
+
+impl<T, U: Allocation<T>> IndexMut<usize> for GpuArray<T, U> {
+    fn index_mut(&mut self, index: usize) -> &mut T {
+        if index >= self.len {
+            panic!("Index {} out of bounds (len: {})", index, self.len);
+        }
+        // SAFETY: This is bounds checked above
+        unsafe { &mut *(self.raw.add(index)) }
+    }
+}
+
+// SAFETY: GpuArray are Send as long as the contained type itself is Send
+unsafe impl<T: Send, U: Allocation<T>> Send for GpuArray<T, U> {}
+
+impl<T: fmt::Debug, U: Allocation<T>> fmt::Debug for GpuArray<T, U> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct(core::any::type_name::<T>())
             .field("array", &format_args!("{:#X?}", self.as_slice()))
