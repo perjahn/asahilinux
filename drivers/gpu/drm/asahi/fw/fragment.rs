@@ -206,7 +206,7 @@ pub(crate) mod raw {
         pub(crate) microsequence: GpuPointer<'a, &'a [u8]>,
         pub(crate) microsequence_size: u32,
         pub(crate) notifier: GpuPointer<'a, event::Notifier::ver>,
-        pub(crate) buffer: GpuWeakPointer<fw::buffer::Info::ver>,
+        pub(crate) buffer: GpuPointer<'a, fw::buffer::Info::ver>,
         pub(crate) scene: GpuPointer<'a, fw::buffer::Scene::ver>,
         pub(crate) unk_buffer_buf: GpuWeakPointer<[u8]>,
         pub(crate) tvb_tilemap: GpuPointer<'a, &'a [u8]>,

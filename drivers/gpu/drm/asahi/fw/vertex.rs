@@ -112,7 +112,7 @@ pub(crate) mod raw {
         pub(crate) notifier: GpuPointer<'a, event::Notifier::ver>,
         pub(crate) buffer_slot: u32,
         pub(crate) unk_1c: u32,
-        pub(crate) buffer: GpuWeakPointer<fw::buffer::Info::ver>,
+        pub(crate) buffer: GpuPointer<'a, fw::buffer::Info::ver>,
         pub(crate) scene: GpuPointer<'a, fw::buffer::Scene::ver>,
         pub(crate) unk_buffer_buf: GpuWeakPointer<[u8]>,
         pub(crate) unk_34: u32,

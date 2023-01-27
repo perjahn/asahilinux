@@ -579,7 +579,7 @@ impl file::Queue for RenderQueue::ver {
                     stamp_value: next_frag,
                     unk_18: 0,
                     scene: scene.weak_pointer(),
-                    buffer: scene.buffer_pointer(),
+                    buffer: scene.weak_buffer_pointer(),
                     unk_2c: U64(1),
                     stats,
                     unk_pointer: inner_weak_ptr!(ptr, unk_pointee),
@@ -850,16 +850,16 @@ impl file::Queue for RenderQueue::ver {
                 fw::buffer::InitBuffer::ver {
                     scene: scene.clone(),
                 },
-                |_inner, ptr: &mut MaybeUninit<fw::buffer::raw::InitBuffer::ver>| {
+                |inner, ptr: &mut MaybeUninit<fw::buffer::raw::InitBuffer::ver<'_>>| {
                     Ok(place!(
                         ptr,
                         fw::buffer::raw::InitBuffer::ver {
                             tag: fw::workqueue::CommandType::InitBuffer,
                             vm_slot: vm_bind.slot(),
-                            buffer_slot: scene.slot(),
+                            buffer_slot: inner.scene.slot(),
                             unk_c: 0,
                             block_count: self.buffer.block_count(),
-                            buffer: scene.buffer_pointer(),
+                            buffer: inner.scene.buffer_pointer(),
                             stamp_value: next_vtx,
                         }
                     ))
@@ -883,7 +883,7 @@ impl file::Queue for RenderQueue::ver {
                     header: microseq::op::StartVertex::HEADER,
                     tiling_params: inner_weak_ptr!(ptr, tiling_params),
                     job_params1: inner_weak_ptr!(ptr, job_params1),
-                    buffer: scene.buffer_pointer(),
+                    buffer: scene.weak_buffer_pointer(),
                     scene: scene.weak_pointer(),
                     stats,
                     work_queue: self.wq_vtx.info_pointer(),
@@ -951,7 +951,7 @@ impl file::Queue for RenderQueue::ver {
                 builder.add(microseq::FinalizeVertex::ver {
                     header: microseq::op::FinalizeVertex::HEADER,
                     scene: scene.weak_pointer(),
-                    buffer: scene.buffer_pointer(),
+                    buffer: scene.weak_buffer_pointer(),
                     stats,
                     work_queue: self.wq_vtx.info_pointer(),
                     vm_slot: vm_bind.slot(),

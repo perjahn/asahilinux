@@ -100,13 +100,13 @@ pub(crate) mod raw {
     #[versions(AGX)]
     #[derive(Debug)]
     #[repr(C)]
-    pub(crate) struct InitBuffer {
+    pub(crate) struct InitBuffer<'a> {
         pub(crate) tag: workqueue::CommandType,
         pub(crate) vm_slot: u32,
         pub(crate) buffer_slot: u32,
         pub(crate) unk_c: u32,
         pub(crate) block_count: u32,
-        pub(crate) buffer: GpuWeakPointer<super::Info::ver>,
+        pub(crate) buffer: GpuPointer<'a, super::Info::ver>,
         pub(crate) stamp_value: EventValue,
     }
 }
@@ -167,5 +167,5 @@ impl workqueue::Command for InitBuffer::ver {}
 
 #[versions(AGX)]
 impl GpuStruct for InitBuffer::ver {
-    type Raw<'a> = raw::InitBuffer::ver;
+    type Raw<'a> = raw::InitBuffer::ver<'a>;
 }

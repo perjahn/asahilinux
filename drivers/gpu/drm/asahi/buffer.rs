@@ -147,8 +147,16 @@ impl Scene::ver {
         self.object.buffer.inner.lock().kernel_buffer.weak_pointer()
     }
 
+    /// Returns the GPU pointer to the `buffer::Info::ver` object associated with this Scene.
+    pub(crate) fn buffer_pointer(&self) -> GpuPointer<'_, buffer::Info::ver> {
+        // We can't return the strong pointer directly since its lifetime crosses a lock, but we know
+        // its lifetime will be valid as long as &self since we hold a reference to the buffer,
+        // so just construct the strong pointer with the right lifetime here.
+        unsafe { self.weak_buffer_pointer().upgrade() }
+    }
+
     /// Returns the GPU weak pointer to the `buffer::Info::ver` object associated with this Scene.
-    pub(crate) fn buffer_pointer(&self) -> GpuWeakPointer<buffer::Info::ver> {
+    pub(crate) fn weak_buffer_pointer(&self) -> GpuWeakPointer<buffer::Info::ver> {
         self.object.buffer.inner.lock().info.weak_pointer()
     }
 
@@ -568,6 +576,8 @@ impl Buffer::ver {
             seq_buf: seq_buf,
         })?;
 
+        // Could be made strong, but we wind up with a deadlock if we try to grab the
+        // pointer through the inner.buffer path inside the closure.
         let stats_pointer = inner.stats.weak_pointer();
 
         // macOS allocates this as private. However, the firmware does not

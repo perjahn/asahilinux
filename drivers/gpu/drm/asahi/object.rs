@@ -153,6 +153,12 @@ impl<T: ?Sized> GpuWeakPointer<T> {
             PhantomData,
         )
     }
+
+    /// Upgrade a weak pointer into a strong pointer. This is not considered safe from the GPU
+    /// perspective.
+    pub(crate) unsafe fn upgrade<'a>(&self) -> GpuPointer<'a, T> {
+        GpuPointer(self.0, PhantomData)
+    }
 }
 
 impl<T: ?Sized> fmt::Debug for GpuWeakPointer<T> {
