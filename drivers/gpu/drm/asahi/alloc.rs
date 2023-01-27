@@ -398,6 +398,10 @@ pub(crate) struct SimpleAllocation {
     obj: crate::gem::ObjectRef,
 }
 
+/// SAFETY: `SimpleAllocation` just points to raw memory and should be safe to send across threads.
+unsafe impl Send for SimpleAllocation {}
+unsafe impl Sync for SimpleAllocation {}
+
 impl Drop for SimpleAllocation {
     fn drop(&mut self) {
         mod_dev_dbg!(
@@ -552,6 +556,10 @@ pub(crate) struct HeapAllocationInner {
     ptr: Option<NonNull<u8>>,
     real_size: usize,
 }
+
+/// SAFETY: `SimpleAllocation` just points to raw memory and should be safe to send across threads.
+unsafe impl Send for HeapAllocationInner {}
+unsafe impl Sync for HeapAllocationInner {}
 
 /// Outer view of a heap allocation.
 ///
