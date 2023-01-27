@@ -469,7 +469,7 @@ impl GpuManager::ver {
             gpu_id.num_gps * gpu_id.num_clusters
         );
         dev_info!(dev, "  Core masks: {:#x?}\n", gpu_id.core_masks);
-        dev_info!(dev, "  Active cores: {}\n", gpu_id.num_active_cores);
+        dev_info!(dev, "  Active cores: {}\n", gpu_id.total_active_cores);
 
         dev_info!(dev, "Getting configuration from device tree...\n");
         let pwr_cfg = hw::PwrConfig::load(dev, cfg)?;

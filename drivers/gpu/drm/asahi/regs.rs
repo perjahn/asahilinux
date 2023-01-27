@@ -225,14 +225,14 @@ impl Resources {
         }
 
         let mut core_masks = Vec::new();
-        let mut num_active_cores: u32 = 0;
+        let mut total_active_cores: u32 = 0;
 
         let max_core_mask = (1u64 << num_cores) - 1;
         for _i in 0..num_clusters {
             let mask = core_mask & max_core_mask;
             core_masks.try_push(mask as u32)?;
             core_mask >>= num_cores;
-            num_active_cores += mask.count_ones();
+            total_active_cores += mask.count_ones();
         }
         let mut core_masks_packed = Vec::new();
         core_masks_packed.try_push(core_mask_0)?;
@@ -288,9 +288,9 @@ impl Resources {
             max_dies: (id_clusters >> 20) & 0xf,
             num_clusters,
             num_cores,
-            num_active_cores,
             num_frags: (id_counts_1 >> 8) & 0xff,
             num_gps: (id_counts_2 >> 16) & 0xff,
+            total_active_cores,
             core_masks,
             core_masks_packed,
         })
