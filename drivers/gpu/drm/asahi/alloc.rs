@@ -213,7 +213,10 @@ pub(crate) trait Allocator {
     fn new_boxed<T: GpuStruct>(
         &mut self,
         inner: Box<T>,
-        callback: impl for<'a> FnOnce(&'a T, *mut MaybeUninit<T::Raw<'a>>) -> Result<&'a mut T::Raw<'a>>,
+        callback: impl for<'a> FnOnce(
+            &'a T,
+            &'a mut MaybeUninit<T::Raw<'a>>,
+        ) -> Result<&'a mut T::Raw<'a>>,
     ) -> Result<GpuObject<T, GenericAlloc<T, Self::Raw>>> {
         GpuObject::<T, GenericAlloc<T, Self::Raw>>::new_boxed(self.alloc_object()?, inner, callback)
     }
@@ -223,7 +226,10 @@ pub(crate) trait Allocator {
     fn new_inplace<T: GpuStruct>(
         &mut self,
         inner: T,
-        callback: impl for<'a> FnOnce(&'a T, *mut MaybeUninit<T::Raw<'a>>) -> Result<&'a mut T::Raw<'a>>,
+        callback: impl for<'a> FnOnce(
+            &'a T,
+            &'a mut MaybeUninit<T::Raw<'a>>,
+        ) -> Result<&'a mut T::Raw<'a>>,
     ) -> Result<GpuObject<T, GenericAlloc<T, Self::Raw>>> {
         GpuObject::<T, GenericAlloc<T, Self::Raw>>::new_inplace(
             self.alloc_object()?,
@@ -248,7 +254,10 @@ pub(crate) trait Allocator {
     fn new_prealloc<T: GpuStruct>(
         &mut self,
         inner_cb: impl FnOnce(GpuWeakPointer<T>) -> Result<Box<T>>,
-        raw_cb: impl for<'a> FnOnce(&'a T, *mut MaybeUninit<T::Raw<'a>>) -> Result<&'a mut T::Raw<'a>>,
+        raw_cb: impl for<'a> FnOnce(
+            &'a T,
+            &'a mut MaybeUninit<T::Raw<'a>>,
+        ) -> Result<&'a mut T::Raw<'a>>,
     ) -> Result<GpuObject<T, GenericAlloc<T, Self::Raw>>> {
         GpuObject::<T, GenericAlloc<T, Self::Raw>>::new_prealloc(
             self.alloc_object()?,

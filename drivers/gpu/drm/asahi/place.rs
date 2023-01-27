@@ -132,13 +132,13 @@ macro_rules! place {
     ) => {{
         use core::mem::MaybeUninit;
         // Ensures types are correct
-        let buf: *mut MaybeUninit<_> = $buf;
-        let top_ptr = unsafe{ (*buf).as_mut_ptr() };
+        let obj: &mut MaybeUninit<_> = $buf;
+        let top_ptr = obj.as_mut_ptr();
         place!(@FIELDS top_ptr, _TOP: $($val)*);
         // SAFETY: All fields have been initialized above
         // The compiler ensures that all fields were used, all types were correct,
         // and that size and alignment are correct.
-        unsafe { (*buf).assume_init_mut() }
+        unsafe { obj.assume_init_mut() }
     }};
 }
 
@@ -205,10 +205,10 @@ mod tests {
 
     #[test]
     fn test_initialized() {
-        let mut buf = MaybeUninit::uninit();
+        let mut buf: MaybeUninit<MyCoolStruct> = MaybeUninit::uninit();
 
         let x: &mut MyCoolStruct = place!(
-            (&mut buf) as *mut _,
+            &mut buf,
             MyCoolStruct {
                 b: true,
                 s: String::from("works"),
@@ -255,10 +255,10 @@ mod tests {
 
     #[test]
     fn test_default() {
-        let mut buf = MaybeUninit::uninit();
+        let mut buf: MaybeUninit<MyDefaultStruct> = MaybeUninit::uninit();
 
         let x: &mut MyDefaultStruct = place!(
-            (&mut buf) as *mut _,
+            &mut buf,
             MyDefaultStruct {
                 b: true,
                 i: 1,
@@ -278,9 +278,9 @@ mod tests {
 
     #[test]
     fn test_scalar() {
-        let mut buf = MaybeUninit::uninit();
+        let mut buf: MaybeUninit<u32> = MaybeUninit::uninit();
 
-        let x: &mut u32 = place!((&mut buf) as *mut MaybeUninit<u32>, 1234);
+        let x: &mut u32 = place!(&mut buf, 1234);
 
         assert_eq!(x, &mut 1234u32);
     }

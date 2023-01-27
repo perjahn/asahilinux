@@ -259,7 +259,10 @@ impl<T: GpuStruct, U: Allocation<T>> GpuObject<T, U> {
     pub(crate) fn new_boxed(
         alloc: U,
         inner: Box<T>,
-        callback: impl for<'a> FnOnce(&'a T, *mut MaybeUninit<T::Raw<'a>>) -> Result<&'a mut T::Raw<'a>>,
+        callback: impl for<'a> FnOnce(
+            &'a T,
+            &'a mut MaybeUninit<T::Raw<'a>>,
+        ) -> Result<&'a mut T::Raw<'a>>,
     ) -> Result<Self> {
         if alloc.size() < mem::size_of::<T::Raw<'static>>() {
             return Err(ENOMEM);
@@ -273,8 +276,9 @@ impl<T: GpuStruct, U: Allocation<T>> GpuObject<T, U> {
             alloc.gpu_ptr()
         );
         let p = alloc.ptr().ok_or(EINVAL)?.as_ptr() as *mut MaybeUninit<T::Raw<'_>>;
-        let raw = callback(&inner, p)? as *mut _ as *mut MaybeUninit<T::Raw<'_>>;
-        if p != raw {
+        // SAFETY: `p` is guaranteed to be valid per the Allocation invariant.
+        let raw = callback(&inner, unsafe { &mut *p })?;
+        if p as *mut T::Raw<'_> != raw as *mut _ {
             dev_err!(
                 alloc.device(),
                 "Allocation callback returned a mismatched reference ({})",
@@ -299,7 +303,10 @@ impl<T: GpuStruct, U: Allocation<T>> GpuObject<T, U> {
     pub(crate) fn new_inplace(
         alloc: U,
         inner: T,
-        callback: impl for<'a> FnOnce(&'a T, *mut MaybeUninit<T::Raw<'a>>) -> Result<&'a mut T::Raw<'a>>,
+        callback: impl for<'a> FnOnce(
+            &'a T,
+            &'a mut MaybeUninit<T::Raw<'a>>,
+        ) -> Result<&'a mut T::Raw<'a>>,
     ) -> Result<Self> {
         GpuObject::<T, U>::new_boxed(alloc, Box::try_new(inner)?, callback)
     }
@@ -313,7 +320,10 @@ impl<T: GpuStruct, U: Allocation<T>> GpuObject<T, U> {
     pub(crate) fn new_prealloc(
         alloc: U,
         inner_cb: impl FnOnce(GpuWeakPointer<T>) -> Result<Box<T>>,
-        raw_cb: impl for<'a> FnOnce(&'a T, *mut MaybeUninit<T::Raw<'a>>) -> Result<&'a mut T::Raw<'a>>,
+        raw_cb: impl for<'a> FnOnce(
+            &'a T,
+            &'a mut MaybeUninit<T::Raw<'a>>,
+        ) -> Result<&'a mut T::Raw<'a>>,
     ) -> Result<Self> {
         if alloc.size() < mem::size_of::<T::Raw<'static>>() {
             return Err(ENOMEM);
@@ -328,8 +338,9 @@ impl<T: GpuStruct, U: Allocation<T>> GpuObject<T, U> {
         );
         let inner = inner_cb(gpu_ptr)?;
         let p = alloc.ptr().ok_or(EINVAL)?.as_ptr() as *mut MaybeUninit<T::Raw<'_>>;
-        let raw = raw_cb(&*inner, p)? as *mut _ as *mut MaybeUninit<T::Raw<'_>>;
-        if p != raw {
+        // SAFETY: `p` is guaranteed to be valid per the Allocation invariant.
+        let raw = raw_cb(&*inner, unsafe { &mut *p })?;
+        if p as *mut T::Raw<'_> != raw as *mut _ {
             dev_err!(
                 alloc.device(),
                 "Allocation callback returned a mismatched reference ({})",

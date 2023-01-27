@@ -90,7 +90,7 @@ impl RenderQueue::ver {
                 fw::event::Notifier::ver {
                     threshold: alloc.shared.new_default::<fw::event::Threshold>()?,
                 },
-                |inner, ptr: *mut MaybeUninit<fw::event::raw::Notifier::ver<'_>>| {
+                |inner, ptr: &mut MaybeUninit<fw::event::raw::Notifier::ver<'_>>| {
                     Ok(place!(
                         ptr,
                         fw::event::raw::Notifier::ver {
@@ -412,7 +412,7 @@ impl file::Queue for RenderQueue::ver {
 
         let barrier: GpuObject<fw::workqueue::Barrier> = kalloc.private.new_inplace(
             Default::default(),
-            |_inner, ptr: *mut MaybeUninit<fw::workqueue::raw::Barrier>| {
+            |_inner, ptr: &mut MaybeUninit<fw::workqueue::raw::Barrier>| {
                 Ok(place!(
                     ptr,
                     fw::workqueue::raw::Barrier {
@@ -840,7 +840,7 @@ impl file::Queue for RenderQueue::ver {
                 fw::buffer::InitBuffer::ver {
                     scene: scene.clone(),
                 },
-                |_inner, ptr: *mut MaybeUninit<fw::buffer::raw::InitBuffer::ver>| {
+                |_inner, ptr: &mut MaybeUninit<fw::buffer::raw::InitBuffer::ver>| {
                     Ok(place!(
                         ptr,
                         fw::buffer::raw::InitBuffer::ver {

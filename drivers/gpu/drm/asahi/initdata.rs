@@ -637,7 +637,7 @@ impl<'a> InitDataBuilder::ver<'a> {
                 vtx: self.alloc.private.new_default::<GpuGlobalStatsVtx::ver>()?,
                 frag: self.alloc.private.new_inplace(
                     Default::default(),
-                    |_inner, ptr: *mut MaybeUninit<raw::GpuGlobalStatsFrag::ver>| {
+                    |_inner, ptr: &mut MaybeUninit<raw::GpuGlobalStatsFrag::ver>| {
                         Ok(place!(
                             ptr,
                             raw::GpuGlobalStatsFrag::ver {

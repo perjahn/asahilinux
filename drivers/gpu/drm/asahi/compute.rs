@@ -78,7 +78,7 @@ impl ComputeQueue::ver {
                 fw::event::Notifier::ver {
                     threshold: alloc.shared.new_default::<fw::event::Threshold>()?,
                 },
-                |inner, ptr: *mut MaybeUninit<fw::event::raw::Notifier::ver<'_>>| {
+                |inner, ptr: &mut MaybeUninit<fw::event::raw::Notifier::ver<'_>>| {
                     Ok(place!(
                         ptr,
                         fw::event::raw::Notifier::ver {
