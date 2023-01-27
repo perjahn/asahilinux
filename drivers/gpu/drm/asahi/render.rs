@@ -277,6 +277,10 @@ impl file::Queue for RenderQueue::ver {
             Some(gpu) => gpu,
             None => panic!("GpuManager mismatched with RenderQueue!"),
         };
+
+        // Wake up the firmware early while we get everything ready.
+        let _op_guard = gpu.start_op()?;
+
         let notifier = &self.notifier;
 
         let nclusters = gpu.get_dyncfg().id.num_clusters;
@@ -1165,8 +1169,6 @@ impl file::Queue for RenderQueue::ver {
         // we rework the submission stuff.
         let batch_frag = batches_frag.commit()?;
         let batch_vtx = batches_vtx.commit()?;
-
-        let _op_guard = gpu.start_op()?;
 
         mod_dev_dbg!(self.dev, "[Submission {}] Submit frag!\n", id);
         gpu.submit_batch(batches_frag)?;

@@ -131,6 +131,10 @@ impl file::Queue for ComputeQueue::ver {
             Some(gpu) => gpu,
             None => panic!("GpuManager mismatched with ComputeQueue!"),
         };
+
+        // Wake up the firmware early while we get everything ready.
+        let _op_guard = gpu.start_op()?;
+
         let notifier = &self.notifier;
 
         let mut alloc = gpu.alloc();
@@ -426,7 +430,6 @@ impl file::Queue for ComputeQueue::ver {
         batches.add(Box::try_new(comp)?)?;
         let batch = batches.commit()?;
 
-        let _op_guard = gpu.start_op()?;
         mod_dev_dbg!(self.dev, "[Submission {}] Submit compute!\n", id);
         gpu.submit_batch(batches)?;
 
