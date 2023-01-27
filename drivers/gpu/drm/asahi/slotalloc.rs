@@ -31,6 +31,11 @@ pub(crate) trait SlotItem {
     fn release(&mut self, _data: &mut Self::Data, _slot: u32) {}
 }
 
+/// Trivial implementation for users which do not require any slot data nor any allocator data.
+impl SlotItem for () {
+    type Data = ();
+}
+
 /// Represents a current or previous allocation of an item from a slot. Users keep `SlotToken`s
 /// around across allocations to request that, if possible, the same slot be reused.
 #[derive(Copy, Clone, Debug)]
