@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only OR MIT
-#![allow(missing_docs)]
 
-//! Hardware configuration for t8103 platforms
+//! Hardware configuration for t8112 platforms (M2).
 
 use crate::f32;
 
