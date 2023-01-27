@@ -1,22 +1,28 @@
 // SPDX-License-Identifier: GPL-2.0-only OR MIT
-#![allow(missing_docs)]
-#![allow(unused_imports)]
-#![allow(dead_code)]
 
-//! Asahi GPU work queues
+//! GPU command execution queues
+//!
+//! The AGX GPU firmware schedules GPU work commands out of work queues, which are ring buffers of
+//! pointers to work commands. There can be an arbitrary number of work queues. Work queues have an
+//! associated type (vertex, fragment, or compute) and may only contain generic commands or commands
+//! specific to that type.
+//!
+//! This module manages queueing work commands into a work queue and submitting them for execution
+//! by the firmware. An active work queue needs an event to signal completion of its work, which is
+//! owned by what we call a batch. This event then notifies the work queue when work is completed,
+//! and that triggers freeing of all resources associated with that work. An idle work queue gives
+//! up its associated event.
 
 use crate::debug::*;
 use crate::fw::channels::PipeType;
 use crate::fw::event::NotifierList;
 use crate::fw::types::*;
 use crate::fw::workqueue::*;
-use crate::{alloc, channel, event, fw, gpu, object, regs};
-use crate::{box_in_place, inner_weak_ptr, place};
-use core::mem;
+use crate::{box_in_place, place};
+use crate::{channel, event, fw, gpu, object, regs};
 use core::sync::atomic::Ordering;
-use core::time::Duration;
 use kernel::{
-    bindings, dbg,
+    bindings,
     prelude::*,
     sync::{smutex, Arc, CondVar, Guard, Mutex, UniqueArc},
     Opaque,
@@ -24,14 +30,16 @@ use kernel::{
 
 const DEBUG_CLASS: DebugFlags = DebugFlags::WorkQueue;
 
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct WorkToken(u64);
-
+/// An enum of possible errors that might cause a piece of work to fail execution.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub(crate) enum BatchError {
+    /// GPU timeout (command execution took too long).
     Timeout,
+    /// GPU MMU fault (invalid access).
     Fault(regs::FaultInfo),
+    /// Unknown reason.
     Unknown,
+    /// Work failed due to an error caused by other concurrent GPU work.
     Killed,
 }
 
@@ -47,6 +55,7 @@ impl From<BatchError> for kernel::error::Error {
     }
 }
 
+/// A batch of commands that has been submitted to a workqueue as one unit.
 pub(crate) struct Batch {
     value: event::EventValue,
     commands: usize,
@@ -58,16 +67,15 @@ pub(crate) struct Batch {
 }
 
 impl Batch {
-    pub(crate) fn value(&self) -> event::EventValue {
-        self.value
-    }
-
+    /// Wait for the batch to complete execution and return the execution status.
     pub(crate) fn wait(&self) -> core::result::Result<(), BatchError> {
+        // TODO: Properly abstract this.
         unsafe { bindings::wait_for_completion(self.completion.get()) };
         self.error.lock().map_or(Ok(()), Err)
     }
 }
 
+/// Inner data for managing a single work queue.
 #[versions(AGX)]
 struct WorkQueueInner {
     event_manager: Arc<event::EventManager>,
@@ -83,9 +91,11 @@ struct WorkQueueInner {
     priority: u32,
 }
 
+// SAFETY: We only expose thread-safe methods.
 #[versions(AGX)]
 unsafe impl Send for WorkQueueInner::ver {}
 
+/// An instance of a work queue.
 #[versions(AGX)]
 pub(crate) struct WorkQueue {
     info_pointer: GpuWeakPointer<QueueInfo::ver>,
@@ -93,10 +103,13 @@ pub(crate) struct WorkQueue {
     cond: CondVar,
 }
 
+/// The default work queue size.
 const WQ_SIZE: u32 = 0x500;
 
 #[versions(AGX)]
 impl WorkQueueInner::ver {
+    /// Return the GPU done pointer, representing how many work items have been completed by the
+    /// GPU.
     fn doneptr(&self) -> u32 {
         self.info
             .state
@@ -104,6 +117,8 @@ impl WorkQueueInner::ver {
     }
 }
 
+/// An in-progress batch of commands to be submitted to a WorkQueue. Further commands can be added
+/// before submission.
 #[versions(AGX)]
 pub(crate) struct BatchBuilder<'a> {
     queue: &'a WorkQueue::ver,
@@ -115,6 +130,7 @@ pub(crate) struct BatchBuilder<'a> {
 
 #[versions(AGX)]
 impl WorkQueue::ver {
+    /// Create a new WorkQueue of a given type and priority.
     pub(crate) fn new(
         alloc: &mut gpu::KernelAllocators,
         event_manager: Arc<event::EventManager>,
@@ -209,10 +225,12 @@ impl WorkQueue::ver {
         Ok(queue.into())
     }
 
+    /// Returns the QueueInfo pointer for this workqueue, as a weak pointer.
     pub(crate) fn info_pointer(&self) -> GpuWeakPointer<QueueInfo::ver> {
         self.info_pointer
     }
 
+    /// Start a new batch of work on this queue.
     pub(crate) fn begin_batch(
         this: &Arc<WorkQueue::ver>,
         vm_slot: u32,
@@ -236,6 +254,8 @@ impl WorkQueue::ver {
     }
 }
 
+/// Trait used to erase the version-specific type of WorkQueues, to avoid leaking
+/// version-specificity into the event module.
 pub(crate) trait WorkQueue {
     fn signal(&self) -> bool;
     fn mark_error(&self, value: event::EventValue, error: BatchError);
@@ -243,6 +263,9 @@ pub(crate) trait WorkQueue {
 
 #[versions(AGX)]
 impl WorkQueue for WorkQueue::ver {
+    /// Signal a workqueue that some work was completed.
+    ///
+    /// This will check the event stamp value to find out exactly how many commands were processed.
     fn signal(&self) -> bool {
         let mut inner = self.inner.lock();
         let event = inner.event.as_ref();
@@ -306,11 +329,13 @@ impl WorkQueue for WorkQueue::ver {
         core::mem::drop(inner);
 
         for batch in completed {
+            // TODO: Properly abstract this.
             unsafe { bindings::complete_all(batch.completion.get()) };
         }
         empty
     }
 
+    /// Mark this queue's work up to a certain stamp value as having failed.
     fn mark_error(&self, value: event::EventValue, error: BatchError) {
         // If anything is marked completed, we can consider it successful
         // at this point, even if we didn't get the signal event yet.
@@ -351,6 +376,7 @@ impl WorkQueue for WorkQueue::ver {
 
 #[versions(AGX)]
 impl<'a> BatchBuilder::ver<'a> {
+    /// Add a command to a work batch.
     pub(crate) fn add<T: Command>(&mut self, command: Box<GpuObject<T>>) -> Result {
         let inner = &mut self.inner;
 
@@ -378,6 +404,11 @@ impl<'a> BatchBuilder::ver<'a> {
         Ok(())
     }
 
+    /// Commit the pending commands and submit them to the GPU, returning a Batch object. This
+    /// builder can then be reused to submit more commands.
+    ///
+    /// Note that the GPU must still be notified separately to actually begin work execution on any
+    /// given queue by using GpuManager::submit_batch().
     pub(crate) fn commit(&mut self) -> Result<Arc<Batch>> {
         let inner = &mut self.inner;
         inner.batches.try_reserve(1)?;
@@ -411,6 +442,9 @@ impl<'a> BatchBuilder::ver<'a> {
         Ok(batch)
     }
 
+    /// Submit a work execution request for the newest committed batch to a PipeChannel.
+    ///
+    /// All pending work must have been committed before calling this.
     pub(crate) fn submit(mut self, channel: &mut channel::PipeChannel::ver) -> Result {
         if self.commands != 0 {
             return Err(EINVAL);
@@ -431,6 +465,7 @@ impl<'a> BatchBuilder::ver<'a> {
         Ok(())
     }
 
+    /// Return the Event associated with this in-progress batch.
     pub(crate) fn event(&self) -> &event::Event {
         let event = self
             .inner
@@ -440,6 +475,9 @@ impl<'a> BatchBuilder::ver<'a> {
         &(event.0)
     }
 
+    /// Returns the current base event value associated with this in-progress batch.
+    ///
+    /// New work should increment this and use it as the completion value.
     pub(crate) fn event_value(&self) -> event::EventValue {
         let event = self
             .inner
@@ -449,10 +487,12 @@ impl<'a> BatchBuilder::ver<'a> {
         event.1
     }
 
+    /// Returns the pipe type of this queue.
     pub(crate) fn pipe_type(&self) -> PipeType {
         self.inner.pipe_type
     }
 
+    /// Returns the priority of this queue.
     pub(crate) fn priority(&self) -> u32 {
         self.inner.priority
     }
@@ -470,9 +510,3 @@ impl<'a> Drop for BatchBuilder::ver<'a> {
         }
     }
 }
-
-#[versions(AGX)]
-unsafe impl Send for WorkQueue::ver {}
-
-#[versions(AGX)]
-unsafe impl Sync for WorkQueue::ver {}
