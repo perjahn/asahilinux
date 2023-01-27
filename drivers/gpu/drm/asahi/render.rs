@@ -468,7 +468,7 @@ impl file::Queue for RenderQueue::ver {
         let count_vtx = count_frag + 1;
 
         let frag = GpuObject::new_prealloc(
-            kalloc.private.prealloc()?,
+            kalloc.private.alloc_object()?,
             |ptr: GpuWeakPointer<fw::fragment::RunFragment::ver>| {
                 let mut builder = microseq::Builder::new();
 
@@ -860,7 +860,7 @@ impl file::Queue for RenderQueue::ver {
         }
 
         let vtx = GpuObject::new_prealloc(
-            kalloc.private.prealloc()?,
+            kalloc.private.alloc_object()?,
             |ptr: GpuWeakPointer<fw::vertex::RunVertex::ver>| {
                 let mut builder = microseq::Builder::new();
 

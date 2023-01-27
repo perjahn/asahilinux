@@ -215,7 +215,7 @@ impl file::Queue for ComputeQueue::ver {
         let count = self.counter.fetch_add(1, Ordering::Relaxed);
 
         let comp = GpuObject::new_prealloc(
-            kalloc.private.prealloc()?,
+            kalloc.private.alloc_object()?,
             |ptr: GpuWeakPointer<fw::compute::RunCompute::ver>| {
                 let mut builder = microseq::Builder::new();
 

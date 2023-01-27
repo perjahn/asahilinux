@@ -1,17 +1,18 @@
 // SPDX-License-Identifier: GPL-2.0-only OR MIT
-#![allow(missing_docs)]
-#![allow(unused_imports)]
-#![allow(dead_code)]
 
-//! Asahi kernel object allocator
+//! GPU kernel object allocator.
+//!
+//! This kernel driver needs to manage a large number of GPU objects, in both firmware/kernel
+//! address space and user address space. This module implements a simple grow-only heap allocator
+//! based on the DRM MM range allocator, and a debug allocator that allocates each object as a
+//! separate GEM object.
+//!
+//! Allocations may optionally have debugging enabled, which adds preambles that store metadata
+//! about the allocation. This is useful for live debugging using the hypervisor or postmortem
+//! debugging with a GPU memory snapshot, since it makes it easier to identify use-after-free and
+//! caching issues.
 
-use kernel::{
-    drm::{device, gem, gem::shmem, mm},
-    error::Result,
-    prelude::*,
-    str::CString,
-    sync::Arc,
-};
+use kernel::{drm::mm, error::Result, prelude::*, str::CString};
 
 use crate::debug::*;
 use crate::driver::AsahiDevice;
@@ -20,7 +21,6 @@ use crate::mmu;
 use crate::object::{GpuArray, GpuObject, GpuOnlyArray, GpuStruct, GpuWeakPointer};
 
 use alloc::fmt;
-use core::cell::UnsafeCell;
 use core::cmp::Ordering;
 use core::fmt::{Debug, Formatter};
 use core::marker::PhantomData;
@@ -31,31 +31,48 @@ use core::ptr::NonNull;
 const DEBUG_CLASS: DebugFlags = DebugFlags::Alloc;
 
 #[cfg(not(CONFIG_DRM_ASAHI_DEBUG_ALLOCATOR))]
+/// The driver-global allocator type
 pub(crate) type DefaultAllocator = HeapAllocator;
+
 #[cfg(not(CONFIG_DRM_ASAHI_DEBUG_ALLOCATOR))]
+/// The driver-global allocation type
 pub(crate) type DefaultAllocation = HeapAllocation;
 
 #[cfg(CONFIG_DRM_ASAHI_DEBUG_ALLOCATOR)]
+/// The driver-global allocator type
 pub(crate) type DefaultAllocator = SimpleAllocator;
+
 #[cfg(CONFIG_DRM_ASAHI_DEBUG_ALLOCATOR)]
+/// The driver-global allocation type
 pub(crate) type DefaultAllocation = SimpleAllocation;
 
+/// Represents a raw allocation (without any type information).
 pub(crate) trait RawAllocation {
+    /// Returns the CPU-side pointer (if CPU mapping is enabled) as a byte non-null pointer.
     fn ptr(&self) -> Option<NonNull<u8>>;
+    /// Returns the GPU VA pointer as a u64.
     fn gpu_ptr(&self) -> u64;
+    /// Returns the size of the allocation in bytes.
     fn size(&self) -> usize;
-
+    /// Returns the AsahiDevice that owns this allocation.
     fn device(&self) -> &AsahiDevice;
 }
 
+/// Represents a typed allocation.
 pub(crate) trait Allocation<T>: Debug {
+    /// Returns the typed CPU-side pointer (if CPU mapping is enabled).
     fn ptr(&self) -> Option<NonNull<T>>;
+    /// Returns the GPU VA pointer as a u64.
     fn gpu_ptr(&self) -> u64;
+    /// Returns the size of the allocation in bytes.
     fn size(&self) -> usize;
-
+    /// Returns the AsahiDevice that owns this allocation.
     fn device(&self) -> &AsahiDevice;
 }
 
+/// A generic typed allocation wrapping a RawAllocation.
+///
+/// This is currently the only Allocation implementation, since it is shared by all allocators.
 pub(crate) struct GenericAlloc<T, U: RawAllocation> {
     alloc: U,
     alloc_size: usize,
@@ -91,6 +108,7 @@ impl<T, U: RawAllocation> Debug for GenericAlloc<T, U> {
     }
 }
 
+/// Debugging data associated with an allocation, when debugging is enabled.
 #[repr(C)]
 struct AllocDebugData {
     state: u32,
@@ -101,9 +119,12 @@ struct AllocDebugData {
     name: [u8; 0x20],
 }
 
+/// Magic flag indicating a live allocation.
 const STATE_LIVE: u32 = 0x4556494c;
+/// Magic flag indicating a freed allocation.
 const STATE_DEAD: u32 = 0x44414544;
 
+/// Marker byte to identify when firmware/GPU write beyond the end of an allocation.
 const GUARD_MARKER: u8 = 0x93;
 
 impl<T, U: RawAllocation> Drop for GenericAlloc<T, U> {
@@ -153,20 +174,31 @@ impl<T, U: RawAllocation> Drop for GenericAlloc<T, U> {
 
 static_assert!(mem::size_of::<AllocDebugData>() == 0x40);
 
+/// A trait representing an allocator.
 pub(crate) trait Allocator {
+    /// The raw allocation type used by this allocator.
     type Raw: RawAllocation;
     // TODO: Needs associated_type_defaults
     // type Allocation<T> = GenericAlloc<T, Self::Raw>;
 
+    /// Returns the `AsahiDevice` associated with this allocator.
     fn device(&self) -> &AsahiDevice;
+    /// Returns whether CPU-side mapping is enabled.
     fn cpu_maps(&self) -> bool;
+    /// Returns the minimum alignment for allocations.
     fn min_align(&self) -> usize;
+    /// Allocate an object of the given size in bytes with the given alignment.
     fn alloc(&mut self, size: usize, align: usize) -> Result<Self::Raw>;
+
+    /// Returns a tuple of (count, size) of how much garbage (freed but not yet reusable objects)
+    /// exists in this allocator. Optional.
     fn garbage(&self) -> (usize, usize) {
         (0, 0)
     }
+    /// Collect garbage for this allocator, up to the given object count. Optional.
     fn collect_garbage(&mut self, _count: usize) {}
 
+    /// Allocate a new GpuStruct object. See [`GpuObject::new`].
     #[inline(never)]
     fn new_object<T: GpuStruct>(
         &mut self,
@@ -176,6 +208,7 @@ pub(crate) trait Allocator {
         GpuObject::<T, GenericAlloc<T, Self::Raw>>::new(self.alloc_object()?, inner, callback)
     }
 
+    /// Allocate a new GpuStruct object. See [`GpuObject::new_boxed`].
     #[inline(never)]
     fn new_boxed<T: GpuStruct>(
         &mut self,
@@ -185,6 +218,7 @@ pub(crate) trait Allocator {
         GpuObject::<T, GenericAlloc<T, Self::Raw>>::new_boxed(self.alloc_object()?, inner, callback)
     }
 
+    /// Allocate a new GpuStruct object. See [`GpuObject::new_inplace`].
     #[inline(never)]
     fn new_inplace<T: GpuStruct>(
         &mut self,
@@ -198,6 +232,7 @@ pub(crate) trait Allocator {
         )
     }
 
+    /// Allocate a new GpuStruct object. See [`GpuObject::new_default`].
     #[inline(never)]
     fn new_default<T: GpuStruct + Default>(
         &mut self,
@@ -208,11 +243,7 @@ pub(crate) trait Allocator {
         GpuObject::<T, GenericAlloc<T, Self::Raw>>::new_default(self.alloc_object()?)
     }
 
-    #[inline(never)]
-    fn prealloc<T: GpuStruct>(&mut self) -> Result<GenericAlloc<T, Self::Raw>> {
-        self.alloc_object()
-    }
-
+    /// Allocate a new GpuStruct object. See [`GpuObject::new_prealloc`].
     #[inline(never)]
     fn new_prealloc<T: GpuStruct>(
         &mut self,
@@ -226,6 +257,8 @@ pub(crate) trait Allocator {
         )
     }
 
+    /// Allocate a generic buffer of the given size and alignment, applying the debug features if
+    /// enabled to tag it and detect overflows.
     fn alloc_generic<T>(
         &mut self,
         size: usize,
@@ -305,6 +338,11 @@ pub(crate) trait Allocator {
         Ok(ret)
     }
 
+    /// Allocate an object of a given type, without actually initializing the allocation.
+    ///
+    /// This is useful to directly call [`GpuObject::new_*`], without borrowing a reference to the
+    /// allocator for the entire duration (e.g. if further allocations need to happen inside the
+    /// callbacks).
     fn alloc_object<T: GpuStruct>(&mut self) -> Result<GenericAlloc<T, Self::Raw>> {
         let size = mem::size_of::<T::Raw<'static>>();
         let align = mem::align_of::<T::Raw<'static>>();
@@ -312,6 +350,7 @@ pub(crate) trait Allocator {
         self.alloc_generic(size, align)
     }
 
+    /// Allocate an empty `GpuArray` of a given type and length.
     fn array_empty<T: Sized + Default>(
         &mut self,
         count: usize,
@@ -323,6 +362,7 @@ pub(crate) trait Allocator {
         GpuArray::<T, GenericAlloc<T, Self::Raw>>::empty(alloc, count)
     }
 
+    /// Allocate an empty `GpuOnlyArray` of a given type and length.
     fn array_gpuonly<T: Sized + Default>(
         &mut self,
         count: usize,
@@ -335,6 +375,11 @@ pub(crate) trait Allocator {
     }
 }
 
+/// A simple allocation backed by a separate GEM object.
+///
+/// # Invariants
+/// `ptr` is either None or a valid, non-null pointer to the CPU view of the object.
+/// `gpu_ptr` is the GPU-side VA of the object.
 pub(crate) struct SimpleAllocation {
     dev: AsahiDevice,
     ptr: Option<NonNull<u8>>,
@@ -376,6 +421,12 @@ impl RawAllocation for SimpleAllocation {
     }
 }
 
+/// A simple allocator that allocates each object as its own GEM object, aligned to the end of a
+/// page.
+///
+/// This is very slow, but it has the advantage that over-reads by the firmware or GPU will fault on
+/// the guard page after the allocation, which can be useful to validate that the firmware's or
+/// GPU's idea of object size what we expect.
 pub(crate) struct SimpleAllocator {
     dev: AsahiDevice,
     start: u64,
@@ -387,6 +438,8 @@ pub(crate) struct SimpleAllocator {
 }
 
 impl SimpleAllocator {
+    /// Create a new `SimpleAllocator` for a given address range and `Vm`.
+    #[allow(dead_code)]
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         dev: &AsahiDevice,
@@ -482,25 +535,23 @@ impl Allocator for SimpleAllocator {
     }
 }
 
-struct HeapAllocatorInner {
-    dev: AsahiDevice,
-    allocated: usize,
-    backing_objects: Vec<(crate::gem::ObjectRef, u64)>,
-    garbage: Option<Vec<mm::Node<HeapAllocatorInner, HeapAllocationInner>>>,
-    total_garbage: usize,
-    name: CString,
-    vm_id: u64,
-}
-
+/// Inner data for an allocation from the heap allocator.
+///
+/// This is wrapped in an `mm::Node`.
 pub(crate) struct HeapAllocationInner {
     dev: AsahiDevice,
     ptr: Option<NonNull<u8>>,
     real_size: usize,
 }
 
+/// Outer view of a heap allocation.
+///
+/// This uses an Option<> so we can move the internal `Node` into the garbage pool when it gets
+/// dropped.
+///
+/// # Invariants
+/// The `Option` must always be `Some(...)` while this object is alive.
 pub(crate) struct HeapAllocation(Option<mm::Node<HeapAllocatorInner, HeapAllocationInner>>);
-
-impl HeapAllocation {}
 
 impl Drop for HeapAllocation {
     fn drop(&mut self) {
@@ -572,6 +623,23 @@ impl RawAllocation for HeapAllocation {
     }
 }
 
+/// Inner data for a heap allocator which uses the DRM MM range allocator to manage the heap.
+///
+/// This is wrapped by an `mm::Allocator`.
+struct HeapAllocatorInner {
+    dev: AsahiDevice,
+    allocated: usize,
+    backing_objects: Vec<(crate::gem::ObjectRef, u64)>,
+    garbage: Option<Vec<mm::Node<HeapAllocatorInner, HeapAllocationInner>>>,
+    total_garbage: usize,
+    name: CString,
+    vm_id: u64,
+}
+
+/// A heap allocator which uses the DRM MM range allocator to manage its objects.
+///
+/// The heap is composed of a series of GEM objects. This implementation only ever grows the heap,
+/// never shrinks it.
 pub(crate) struct HeapAllocator {
     dev: AsahiDevice,
     start: u64,
@@ -588,6 +656,8 @@ pub(crate) struct HeapAllocator {
 }
 
 impl HeapAllocator {
+    /// Create a new HeapAllocator for a given `Vm` and address range.
+    #[allow(dead_code)]
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         dev: &AsahiDevice,
@@ -639,6 +709,12 @@ impl HeapAllocator {
         })
     }
 
+    /// Add a new backing block of the given size to this heap.
+    ///
+    /// If CPU mapping is enabled, this also adds a guard node to the range allocator to ensure that
+    /// objects cannot straddle backing block boundaries, since we cannot easily create a contiguous
+    /// CPU VA mapping for them. This can create some fragmentation. If CPU mapping is disabled, we
+    /// skip the guard blocks, since the GPU view of the heap is always contiguous.
     fn add_block(&mut self, size: usize) -> Result {
         let size_aligned = (size + mmu::UAT_PGSZ - 1) & !mmu::UAT_PGMSK;
 
@@ -737,6 +813,7 @@ impl HeapAllocator {
         Ok(())
     }
 
+    /// Find the backing object index that backs a given GPU address.
     fn find_obj(&mut self, addr: u64) -> Result<usize> {
         self.mm.with_inner(|inner| {
             inner
