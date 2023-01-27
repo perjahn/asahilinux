@@ -1,40 +1,52 @@
 // SPDX-License-Identifier: GPL-2.0-only OR MIT
-#![allow(missing_docs)]
-#![allow(unused_imports)]
-#![allow(dead_code)]
 
 //! Common types for firmware structure definitions
 
 use crate::{alloc, object};
-pub(crate) use kernel::macros::versions;
-
-pub(crate) use crate::f32;
-pub(crate) use crate::float::F32;
-pub(crate) use crate::object::{GpuPointer, GpuStruct, GpuWeakPointer};
-pub(crate) use ::alloc::boxed::Box;
 use core::fmt;
 use core::ops::{Deref, DerefMut, Index, IndexMut};
-use core::sync::atomic;
-pub(crate) use core::sync::atomic::{
-    AtomicI16, AtomicI32, AtomicI64, AtomicI8, AtomicU16, AtomicU32, AtomicU64, AtomicU8,
-};
-pub(crate) type GpuObject<T> =
-    object::GpuObject<T, alloc::GenericAlloc<T, alloc::DefaultAllocation>>;
-pub(crate) type GpuArray<T> = object::GpuArray<T, alloc::GenericAlloc<T, alloc::DefaultAllocation>>;
-pub(crate) type GpuOnlyArray<T> =
-    object::GpuOnlyArray<T, alloc::GenericAlloc<T, alloc::DefaultAllocation>>;
-pub(crate) use crate::alloc::Allocator as _Allocator;
+
 pub(crate) use crate::event::EventValue;
-pub(crate) type Allocator = alloc::DefaultAllocator;
+pub(crate) use crate::object::{GpuPointer, GpuStruct, GpuWeakPointer};
+pub(crate) use crate::{f32, float::F32};
+
+pub(crate) use ::alloc::boxed::Box;
 pub(crate) use core::fmt::Debug;
 pub(crate) use core::marker::PhantomData;
+pub(crate) use core::sync::atomic::{AtomicI32, AtomicU32, AtomicU64};
+pub(crate) use kernel::macros::versions;
 
+// Make the trait visible
+pub(crate) use crate::alloc::Allocator as _Allocator;
+
+/// General allocator type used for the driver
+pub(crate) type Allocator = alloc::DefaultAllocator;
+
+/// General GpuObject type used for the driver
+pub(crate) type GpuObject<T> =
+    object::GpuObject<T, alloc::GenericAlloc<T, alloc::DefaultAllocation>>;
+
+/// General GpuArray type used for the driver
+pub(crate) type GpuArray<T> = object::GpuArray<T, alloc::GenericAlloc<T, alloc::DefaultAllocation>>;
+
+/// General GpuOnlyArray type used for the driver
+pub(crate) type GpuOnlyArray<T> =
+    object::GpuOnlyArray<T, alloc::GenericAlloc<T, alloc::DefaultAllocation>>;
+
+/// A stamp slot that is shared between firmware and the driver.
 #[derive(Debug, Default)]
 pub(crate) struct Stamp(pub(crate) AtomicU32);
 
+/// A stamp slot that is for private firmware use.
+///
+/// This is a separate type to guard against pointer type confusion.
 #[derive(Debug, Default)]
 pub(crate) struct FwStamp(pub(crate) AtomicU32);
 
+/// An unaligned u64 type.
+///
+/// This is useful to avoid having to pack firmware structures entirely, since that is incompatible
+/// with `#[derive(Debug)]` and atomics.
 #[derive(Copy, Clone, Default)]
 #[repr(C, packed(1))]
 pub(crate) struct U64(pub(crate) u64);
@@ -48,6 +60,10 @@ impl fmt::Debug for U64 {
     }
 }
 
+/// An unaligned u32 type.
+///
+/// This is useful to avoid having to pack firmware structures entirely, since that is incompatible
+/// with `#[derive(Debug)]` and atomics.
 #[derive(Copy, Clone, Default)]
 #[repr(C, packed(1))]
 pub(crate) struct U32(pub(crate) u32);
@@ -61,6 +77,8 @@ impl fmt::Debug for U32 {
     }
 }
 
+/// Create a dummy `Debug` implementation, for when we need it but it's too painful to write by
+/// hand or not very useful.
 #[macro_export]
 macro_rules! no_debug {
     ($type:ty) => {
@@ -72,19 +90,27 @@ macro_rules! no_debug {
     };
 }
 
-/// Types which can be safely initialized with an all-zero bit pattern
+/// Types which can be safely initialized with an all-zero bit pattern.
+///
 /// See: https://github.com/rust-lang/rfcs/issues/2626
 ///
 /// # Safety
-/// This trait must only be implemented if a type only contains primitive types
-/// which can be zero-initialized, FFI structs, intended to be zero-initialized,
-/// or other types which impl Zeroed.
+///
+/// This trait must only be implemented if a type only contains primitive types which can be
+/// zero-initialized, FFI structs intended to be zero-initialized, or other types which impl Zeroed.
 pub(crate) unsafe trait Zeroed: Default {
     fn zeroed() -> Self {
+        // SAFETY: The user is responsible for ensuring this is safe.
         unsafe { core::mem::zeroed() }
     }
 }
 
+/// Implement Zeroed for a given type (and Default along with it).
+///
+/// # Safety
+///
+/// This macro must only be used if a type only contains primitive types which can be
+/// zero-initialized, FFI structs intended to be zero-initialized, or other types which impl Zeroed.
 #[macro_export]
 macro_rules! default_zeroed {
     (<$($lt:lifetime),*>, $type:ty) => {
@@ -93,6 +119,7 @@ macro_rules! default_zeroed {
                 Zeroed::zeroed()
             }
         }
+        // SAFETY: The user is responsible for ensuring this is safe.
         unsafe impl<$($lt),*> Zeroed for $type {}
     };
     ($type:ty) => {
@@ -101,17 +128,22 @@ macro_rules! default_zeroed {
                 Zeroed::zeroed()
             }
         }
+        // SAFETY: The user is responsible for ensuring this is safe.
         unsafe impl Zeroed for $type {}
     };
 }
 
+/// A convenience type for a number of padding bytes. Hidden from Debug formatting.
 #[derive(Copy, Clone)]
 #[repr(C, packed)]
 pub(crate) struct Pad<const N: usize>([u8; N]);
 
+/// SAFETY: Primitive type, safe to zero-init.
+unsafe impl<const N: usize> Zeroed for Pad<N> {}
+
 impl<const N: usize> Default for Pad<N> {
     fn default() -> Self {
-        Pad([0; N])
+        Zeroed::zeroed()
     }
 }
 
@@ -121,6 +153,7 @@ impl<const N: usize> fmt::Debug for Pad<N> {
     }
 }
 
+/// A convenience type for a fixed-sized array with Default/Zeroed impls.
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub(crate) struct Array<const N: usize, T>([T; N]);
@@ -131,6 +164,7 @@ impl<const N: usize, T> Array<N, T> {
     }
 }
 
+// SAFETY: Arrays of Zeroed values can be safely Zeroed.
 unsafe impl<const N: usize, T: Zeroed> Zeroed for Array<N, T> {}
 
 impl<const N: usize, T: Default> Default for Array<N, T> {
@@ -173,6 +207,8 @@ impl<const N: usize, T: Sized + fmt::Debug> fmt::Debug for Array<N, T> {
     }
 }
 
+/// Convenience macro to define an identically-named trivial GpuStruct with no inner fields for a
+/// given raw type name.
 #[macro_export]
 macro_rules! trivial_gpustruct {
     ($type:ident) => {
@@ -184,23 +220,3 @@ macro_rules! trivial_gpustruct {
         }
     };
 }
-
-/*
-#[derive(Debug, Default)]
-#[repr(transparent)]
-struct Atomic<T>(T);
-
-impl<T: Sized> Deref for Array<N, T> {
-    type Target = [T; N];
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl<const N: usize, T: Sized> DerefMut for Array<N, T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-*/

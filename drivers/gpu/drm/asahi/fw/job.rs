@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only OR MIT
-#![allow(missing_docs)]
-#![allow(dead_code)]
 
-//! Common job structures
+//! Common GPU job firmware structures
 
 use super::types::*;
 use crate::{default_zeroed, trivial_gpustruct};

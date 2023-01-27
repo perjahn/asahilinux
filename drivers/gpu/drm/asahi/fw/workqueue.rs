@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only OR MIT
-#![allow(missing_docs)]
-#![allow(dead_code)]
 
-//! GPU work queues
+//! GPU work queue firmware structes
 
 use super::event;
 use super::types::*;
@@ -14,6 +12,7 @@ use crate::{default_zeroed, trivial_gpustruct};
 pub(crate) enum CommandType {
     RunVertex = 0,
     RunFragment = 1,
+    #[allow(dead_code)]
     RunBlitter = 2,
     RunCompute = 3,
     Barrier = 4,

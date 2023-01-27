@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only OR MIT
-#![allow(missing_docs)]
-#![allow(dead_code)]
 
-//! GPU communication channels (ring buffers)
+//! GPU communication channel firmware structures (ring buffers)
 
 use super::types::*;
 use crate::default_zeroed;
@@ -159,6 +157,7 @@ pub(crate) const DEVICECONTROL_SZ: usize = {
 #[versions(AGX)]
 #[derive(Debug, Copy, Clone)]
 #[repr(C, u32)]
+#[allow(dead_code)]
 pub(crate) enum DeviceControlMsg {
     Unk00(Array<DEVICECONTROL_SZ::ver, u8>),
     Unk01(Array<DEVICECONTROL_SZ::ver, u8>),
@@ -205,6 +204,7 @@ pub(crate) enum DeviceControlMsg {
 default_zeroed!(DeviceControlMsg::ver);
 
 #[derive(Copy, Clone, Default, Debug)]
+#[allow(dead_code)]
 pub(crate) struct FwCtlMsg {
     pub(crate) addr: U64,
     pub(crate) unk_8: u32,
@@ -217,6 +217,7 @@ pub(crate) const EVENT_SZ: usize = 0x34;
 
 #[derive(Debug, Copy, Clone)]
 #[repr(C, u32)]
+#[allow(dead_code)]
 pub(crate) enum EventMsg {
     Fault,
     Flag {
@@ -288,6 +289,7 @@ pub(crate) const STATS_SZ: usize = {
 #[versions(AGX)]
 #[derive(Debug, Copy, Clone)]
 #[repr(C, u32)]
+#[allow(dead_code)]
 pub(crate) enum StatsMsg {
     Power {
         // 0x00

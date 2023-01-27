@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only OR MIT
-#![allow(missing_docs)]
-#![allow(dead_code)]
 
-//! GPU events & stamps
+//! GPU firmware microsequence operations
 
 use super::types::*;
 use super::{buffer, compute, fragment, initdata, vertex, workqueue};
@@ -14,6 +12,7 @@ pub(crate) trait Operation {}
 enum OpCode {
     WaitForIdle = 0x01,
     RetireStamp = 0x18,
+    #[allow(dead_code)]
     Timestamp = 0x19,
     StartVertex = 0x22,
     FinalizeVertex = 0x23,
@@ -82,6 +81,7 @@ pub(crate) mod op {
     #[derive(Debug, Copy, Clone)]
     pub(crate) struct Timestamp(OpHeader);
     impl Timestamp {
+        #[allow(dead_code)]
         pub(crate) const fn new(flag: bool) -> Timestamp {
             Timestamp(OpHeader::with_args(OpCode::Timestamp, (flag as u32) << 31))
         }

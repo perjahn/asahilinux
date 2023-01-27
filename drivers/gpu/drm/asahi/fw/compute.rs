@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only OR MIT
-#![allow(missing_docs)]
-#![allow(dead_code)]
 
-//! GPU compute jobs
+//! GPU compute job firmware structures
 
 use super::types::*;
 use super::{event, job, workqueue};

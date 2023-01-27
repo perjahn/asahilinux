@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-only OR MIT
-#![allow(missing_docs)]
 
 //! Firmware structures for Apple AGX GPUs
 
