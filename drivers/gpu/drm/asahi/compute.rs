@@ -117,6 +117,10 @@ impl ComputeQueue::ver {
 #[versions(AGX)]
 impl file::Queue for ComputeQueue::ver {
     fn submit(&self, cmd: &bindings::drm_asahi_submit, id: u64) -> Result {
+        if cmd.cmd_type != bindings::drm_asahi_cmd_type_DRM_ASAHI_CMD_COMPUTE {
+            return Err(EINVAL);
+        }
+
         let dev = self.dev.data();
         let gpu = match dev.gpu.as_any().downcast_ref::<gpu::GpuManager::ver>() {
             Some(gpu) => gpu,
