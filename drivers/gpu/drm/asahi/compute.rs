@@ -1,23 +1,22 @@
 // SPDX-License-Identifier: GPL-2.0-only OR MIT
-#![allow(missing_docs)]
-#![allow(unused_imports)]
-#![allow(dead_code)]
 #![allow(clippy::unusual_byte_groupings)]
 
-//! Asahi Compute Queue
+//! Compute work queue.
+//!
+//! A compute queue consists of one underlying WorkQueue.
+//! This module is in charge of creating all of the firmware structures required to submit compute
+//! work to the GPU, based on the userspace command buffer.
 
 use crate::alloc::Allocator;
 use crate::debug::*;
 use crate::driver::AsahiDevice;
 use crate::fw::types::*;
 use crate::gpu::GpuManager;
-use crate::util::*;
-use crate::{alloc, channel, driver, event, file, fw, gem, gpu, microseq, mmu, workqueue};
+use crate::{alloc, channel, event, file, fw, gpu, microseq, mmu, workqueue};
 use crate::{box_in_place, inner_ptr, inner_weak_ptr, place};
 use core::mem::MaybeUninit;
 use core::sync::atomic::Ordering;
 use kernel::bindings;
-use kernel::drm::gem::BaseObject;
 use kernel::io_buffer::IoBufferReader;
 use kernel::prelude::*;
 use kernel::sync::{smutex::Mutex, Arc};
@@ -25,6 +24,7 @@ use kernel::user_ptr::UserSlicePtr;
 
 const DEBUG_CLASS: DebugFlags = DebugFlags::Compute;
 
+/// A compute-capable queue from the point of a GPU client.
 #[versions(AGX)]
 pub(crate) struct ComputeQueue {
     dev: AsahiDevice,
@@ -32,7 +32,7 @@ pub(crate) struct ComputeQueue {
     ualloc: Arc<Mutex<alloc::DefaultAllocator>>,
     wq: Arc<workqueue::WorkQueue::ver>,
     gpu_context: GpuObject<fw::workqueue::GpuContextData>,
-    notifier_list: GpuObject<fw::event::NotifierList>,
+    _notifier_list: GpuObject<fw::event::NotifierList>,
     notifier: Arc<GpuObject<fw::event::Notifier::ver>>,
     id: u64,
     // Command count for this queue
@@ -45,6 +45,7 @@ pub(crate) struct ComputeQueue {
 
 #[versions(AGX)]
 impl ComputeQueue::ver {
+    /// Create a new compute queue.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         dev: &AsahiDevice,
@@ -87,6 +88,9 @@ impl ComputeQueue::ver {
                 },
             )?)?;
 
+        // FIXME: keep gpu_context and notifier_list alive as long as work exists on this queue.
+        // Not worth fixing until the syncobj/batch submission refactor.
+
         let ret = Ok(ComputeQueue::ver {
             dev: dev.clone(),
             vm,
@@ -101,7 +105,7 @@ impl ComputeQueue::ver {
                 priority,
             )?,
             gpu_context,
-            notifier_list,
+            _notifier_list: notifier_list,
             notifier,
             id,
             command_count: AtomicU32::new(0),
@@ -116,6 +120,7 @@ impl ComputeQueue::ver {
 
 #[versions(AGX)]
 impl file::Queue for ComputeQueue::ver {
+    /// Submit work to a compute queue.
     fn submit(&self, cmd: &bindings::drm_asahi_submit, id: u64) -> Result {
         if cmd.cmd_type != bindings::drm_asahi_cmd_type_DRM_ASAHI_CMD_COMPUTE {
             return Err(EINVAL);
